@@ -21,6 +21,7 @@ fi
 DOCKER_IMAGE=""
 DOCKER_OPTS=()
 
+# shellcheck source=/dev/null
 source "$CONFIG_DIR/$TOOL"
 shift
 docker run --rm -it -v "$(pwd):/work" -w /work "${DOCKER_OPTS[@]}" "$DOCKER_IMAGE" "${@:-bash}"

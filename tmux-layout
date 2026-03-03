@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+# tmux-layout
+# fzf로 레이아웃 선택 후 세션 생성
+
+SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
+LAYOUT_DIR="${SCRIPT_DIR}/tmux-layouts"
+
+SESSION_NAME="${1:-}"
+PROJECT_DIR="${2:-$PWD}"
+
+if ! command -v fzf &>/dev/null; then
+  echo "fzf가 설치되지 않았습니다. 'brew install fzf'로 설치하세요."
+  exit 1
+fi
+
+if [[ ! -d "$LAYOUT_DIR" ]]; then
+  echo "레이아웃 디렉토리가 없습니다: $LAYOUT_DIR"
+  exit 1
+fi
+
+# 레이아웃 목록
+layouts=$(ls -1 "$LAYOUT_DIR" | sed 's/-layout$//')
+
+if [[ -z "$layouts" ]]; then
+  echo "사용 가능한 레이아웃이 없습니다."
+  exit 1
+fi
+
+# fzf로 레이아웃 선택
+selected=$(echo "$layouts" | fzf --prompt="레이아웃 선택: ")
+
+if [[ -z "$selected" ]]; then
+  exit 0
+fi
+
+# 세션 이름이 없으면 입력 받기
+if [[ -z "$SESSION_NAME" ]]; then
+  read -p "세션 이름: " SESSION_NAME
+  if [[ -z "$SESSION_NAME" ]]; then
+    SESSION_NAME="${selected}-$(date +%H%M)"
+  fi
+fi
+
+# 레이아웃 실행
+exec "$LAYOUT_DIR/${selected}-layout" "$SESSION_NAME" "$PROJECT_DIR"

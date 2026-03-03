@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+# portcheck — 특정 포트를 사용 중인 프로세스 확인
+
+if [[ -z "$1" ]]; then
+  echo "사용법: portcheck <포트번호> [--kill]"
+  echo "예시: portcheck 8080"
+  echo "      portcheck 3000 --kill"
+  exit 1
+fi
+
+PORT="$1"
+KILL="${2:-}"
+
+if [[ "$(uname)" == "Darwin" ]]; then
+  # macOS
+  result=$(lsof -i :"$PORT" -P -n 2>/dev/null)
+else
+  # Linux
+  result=$(ss -tlnp "sport = :$PORT" 2>/dev/null)
+  if [[ -z "$result" ]] || [[ "$result" == *"State"* && $(echo "$result" | wc -l) -le 1 ]]; then
+    result=$(lsof -i :"$PORT" -P -n 2>/dev/null)
+  fi
+fi
+
+if [[ -z "$result" ]]; then
+  echo "포트 $PORT: 사용 중이지 않음 ✓"
+  exit 0
+fi
+
+echo "포트 $PORT 사용 중:"
+echo "$result"
+
+if [[ "$KILL" == "--kill" ]]; then
+  echo ""
+  if [[ "$(uname)" == "Darwin" ]]; then
+    pid=$(lsof -i :"$PORT" -P -n -t 2>/dev/null | head -1)
+  else
+    pid=$(lsof -i :"$PORT" -P -n -t 2>/dev/null | head -1)
+  fi
+
+  if [[ -n "$pid" ]]; then
+    read -p "PID $pid 를 종료하시겠습니까? (y/n) " -n 1 -r
+    echo
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+      kill "$pid" && echo "✓ PID $pid 종료됨"
+    fi
+  fi
+fi

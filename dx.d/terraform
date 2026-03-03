@@ -1,0 +1,6 @@
+DOCKER_IMAGE="hashicorp/terraform:1.12"
+DOCKER_OPTS=(
+  -v "$HOME/.aws:/root/.aws:ro"
+  -v "$HOME/.terraform.d:/root/.terraform.d"
+  -e "TF_LOG=${TF_LOG:-}"
+)

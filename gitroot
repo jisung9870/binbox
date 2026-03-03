@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# gitroot — git 저장소 루트 경로 출력
+# 사용: cd $(gitroot)
+#       eval "$(gitroot --cd)"
+
+root=$(git rev-parse --show-toplevel 2>/dev/null)
+
+if [[ -z "$root" ]]; then
+  echo "git 저장소 안에 있지 않습니다." >&2
+  exit 1
+fi
+
+if [[ "$1" == "--cd" ]]; then
+  echo "cd '$root'"
+else
+  echo "$root"
+fi

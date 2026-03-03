@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+# kctx — fzf 기반 kubectl context 전환
+# kubectx 없이도 빠르게 context 전환
+
+if ! command -v kubectl &>/dev/null; then
+  echo "kubectl이 설치되지 않았습니다."
+  exit 1
+fi
+
+current=$(kubectl config current-context 2>/dev/null)
+
+# 인자가 있으면 직접 전환
+if [[ -n "$1" ]]; then
+  kubectl config use-context "$1"
+  exit $?
+fi
+
+if ! command -v fzf &>/dev/null; then
+  echo "fzf가 설치되지 않았습니다. 'brew install fzf'로 설치하세요."
+  exit 1
+fi
+
+contexts=$(kubectl config get-contexts -o name 2>/dev/null)
+
+if [[ -z "$contexts" ]]; then
+  echo "사용 가능한 context가 없습니다."
+  exit 1
+fi
+
+# 현재 context 표시하며 fzf 선택
+selected=$(echo "$contexts" | fzf \
+  --prompt="context 선택 (현재: ${current}): " \
+  --header="현재: ${current}" \
+  --preview="kubectl config get-contexts {}" \
+  --preview-window=down:3:wrap)
+
+if [[ -n "$selected" ]]; then
+  kubectl config use-context "$selected"
+fi

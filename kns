@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+# kns — fzf 기반 kubectl namespace 전환
+
+if ! command -v kubectl &>/dev/null; then
+  echo "kubectl이 설치되지 않았습니다."
+  exit 1
+fi
+
+current=$(kubectl config view --minify --output 'jsonpath={..namespace}' 2>/dev/null)
+current=${current:-default}
+
+# 인자가 있으면 직접 전환
+if [[ -n "$1" ]]; then
+  kubectl config set-context --current --namespace="$1"
+  exit $?
+fi
+
+if ! command -v fzf &>/dev/null; then
+  echo "fzf가 설치되지 않았습니다. 'brew install fzf'로 설치하세요."
+  exit 1
+fi
+
+namespaces=$(kubectl get namespaces -o jsonpath='{.items[*].metadata.name}' 2>/dev/null | tr ' ' '\n')
+
+if [[ -z "$namespaces" ]]; then
+  echo "namespace 목록을 가져올 수 없습니다."
+  exit 1
+fi
+
+selected=$(echo "$namespaces" | fzf \
+  --prompt="namespace 선택 (현재: ${current}): " \
+  --header="현재: ${current}" \
+  --preview="kubectl get pods -n {} --no-headers 2>/dev/null | head -20" \
+  --preview-window=down:10:wrap)
+
+if [[ -n "$selected" ]]; then
+  kubectl config set-context --current --namespace="$selected"
+  echo "namespace 전환: $selected"
+fi

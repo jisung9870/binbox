@@ -1,0 +1,5 @@
+DOCKER_IMAGE="golang:1.24"
+DOCKER_OPTS=(
+  -v "${GOPATH:-$HOME/go}/pkg/mod:/go/pkg/mod"
+  -e "CGO_ENABLED=0"
+)
