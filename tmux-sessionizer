@@ -1,12 +1,16 @@
 #!/usr/bin/env bash
 
-# 프로젝트 디렉토리 목록 (본인 환경에 맞게 수정)
-PROJECT_DIRS=(
-  "$HOME/home/projects"
-  "$HOME/home/work"
-  "$HOME/home/lab"
-  "$HOME/.config"
-)
+CONFIG_FILE="${XDG_CONFIG_HOME:-$HOME/.config}/tmux-sessionizer/dirs"
+
+if [[ -f "$CONFIG_FILE" ]]; then
+  PROJECT_DIRS=()
+  while IFS= read -r line; do
+    line="${line/#\~/$HOME}"
+    PROJECT_DIRS+=("$line")
+  done <"$CONFIG_FILE"
+else
+  PROJECT_DIRS=("$HOME/home/projects" "$HOME/home/work")
+fi
 
 # fzf 없으면 에러
 if ! command -v fzf &>/dev/null; then

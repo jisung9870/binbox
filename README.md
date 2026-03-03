@@ -89,6 +89,23 @@ tmux-layout my-project ~/home/projects/my-project
 tmux-kill-pattern k8s
 ```
 
+### tmux-sessionizer 설정
+
+프로젝트 디렉토리 목록은 외부 설정 파일로 관리한다. 머신별로 설정 파일만 다르게 두면 스크립트 수정 없이 사용 가능.
+
+```bash
+# 설정 파일 생성
+mkdir -p ~/.config/tmux-sessionizer
+cat > ~/.config/tmux-sessionizer/dirs << 'EOF'
+~/home/projects
+~/home/work
+~/home/lab
+~/.config
+EOF
+```
+
+설정 파일이 없으면 스크립트 내 기본 경로(`~/home/projects`, `~/home/work`)를 사용한다.
+
 ### 레이아웃 추가
 
 `tmux-layouts/` 디렉토리에 `*-layout` 파일을 추가한다. `tmux-layout` 명령어가 자동으로 인식한다.

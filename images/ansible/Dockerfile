@@ -1,25 +1,22 @@
-FROM ubuntu:22.04
+FROM python:3.13-slim
 
-ENV ANSIBLE_CORE_VERSION 2.17.4
-ENV ANSIBLE_VERSION 10.4.0
-ENV ANSIBLE_LINT 24.9.2
+ENV ANSIBLE_CORE_VERSION=2.20.3 \
+    ANSIBLE_VERSION=11.4.0 \
+    ANSIBLE_LINT=25.4.0
 
-RUN DEBIAN_FRONTEND=noninteractive apt-get update && \
-    apt-get install -y gnupg2 python3-pip sshpass git openssh-client && \
-    rm -rf /var/lib/apt/lists/* && \
-    apt-get clean
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+      sshpass git openssh-client && \
+    rm -rf /var/lib/apt/lists/*
 
-RUN python3 -m pip install --upgrade pip cffi && \
-    pip3 install ansible-core==${ANSIBLE_CORE_VERSION} && \
-    pip3 install ansible==${ANSIBLE_VERSION} ansible-lint==${ANSIBLE_LINT} && \
-    pip3 install mitogen jmespath && \
-    pip install --upgrade pywinrm && \
-    rm -rf /root/.cache/pip
+RUN pip install --no-cache-dir \
+      ansible-core==${ANSIBLE_CORE_VERSION} \
+      ansible==${ANSIBLE_VERSION} \
+      ansible-lint==${ANSIBLE_LINT} \
+      mitogen jmespath
 
-RUN mkdir /ansible && \
-    mkdir -p /etc/ansible && \
+RUN mkdir -p /etc/ansible && \
     echo 'localhost' > /etc/ansible/hosts
 
 WORKDIR /ansible
-
-CMD [ "ansible-playbook", "--version" ]
+CMD ["ansible-playbook", "--version"]
