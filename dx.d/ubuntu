@@ -1,0 +1,2 @@
+DOCKER_IMAGE="ubuntu:24.04"
+DOCKER_OPTS=()

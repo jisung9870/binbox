@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+
+SESSION_NAME="$1"
+CONTEXT="${2:-}"  # 선택적 컨텍스트
+
+# 세션이 이미 있으면 종료
+if tmux has-session -t="$SESSION_NAME" 2> /dev/null; then
+    echo "Session $SESSION_NAME already exists"
+    exit 0
+fi
+
+# 새 세션 생성
+tmux new-session -d -s "$SESSION_NAME" -n "k8s"
+
+# 윈도우 1: k8s 작업
+tmux send-keys -t "$SESSION_NAME:1" "# Kubernetes Dashboard (k9s)" C-m
+
+# 세로 분할 (50%)
+tmux split-window -h -t "$SESSION_NAME:1"
+tmux send-keys -t "$SESSION_NAME:1.2" "# kubectl commands" C-m
+
+# 아래쪽 분할 (33%)
+tmux split-window -v -t "$SESSION_NAME:1.2"
+tmux send-keys -t "$SESSION_NAME:1.3" "# logs / events" C-m
+
+# 컨텍스트 설정
+if [[ -n "$CONTEXT" ]]; then
+    tmux send-keys -t "$SESSION_NAME:1.2" "kubectl config use-context $CONTEXT" C-m
+fi
+
+# 첫 번째 패널로 포커스
+tmux select-pane -t "$SESSION_NAME:1.1"
+
+# 세션으로 전환
+tmux switch-client -t "$SESSION_NAME" 2>/dev/null || tmux attach-session -t "$SESSION_NAME"

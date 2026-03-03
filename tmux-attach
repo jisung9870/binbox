@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+# tmux-attach
+# fzf로 기존 세션 선택 또는 새 세션 생성
+
+# fzf 확인
+if ! command -v fzf &> /dev/null; then
+    echo "fzf가 설치되지 않았습니다. 'brew install fzf'로 설치하세요."
+    exit 1
+fi
+
+# 실행 중인 세션 목록
+sessions=$(tmux list-sessions -F "#{session_name}" 2>/dev/null)
+
+# 세션이 없으면 새로 생성
+if [[ -z "$sessions" ]]; then
+    echo "실행 중인 tmux 세션이 없습니다."
+    read -p "새 세션 이름 (Enter=default): " session_name
+    session_name=${session_name:-default}
+    tmux new-session -s "$session_name"
+    exit 0
+fi
+
+# 이미 tmux 안에 있으면
+if [[ -n "$TMUX" ]]; then
+    # 현재 세션 이름 가져오기
+    current_session=$(tmux display-message -p '#S')
+    
+    # 다른 세션 선택 (현재 세션 제외)
+    other_sessions=$(echo "$sessions" | grep -v "^${current_session}$")
+    
+    if [[ -z "$other_sessions" ]]; then
+        echo "현재 세션만 있습니다: $current_session"
+        exit 0
+    fi
+    
+    # fzf로 선택
+    selected=$(echo "$other_sessions" | fzf --prompt="전환할 세션 선택: ")
+    
+    if [[ -n "$selected" ]]; then
+        tmux switch-client -t "$selected"
+    fi
+else
+    # tmux 밖에 있으면 attach
+    # 새 세션 옵션 추가
+    all_options=$(printf "%s\n+ 새 세션 생성" "$sessions")
+    
+    selected=$(echo "$all_options" | fzf --prompt="연결할 세션 선택: ")
+    
+    if [[ -z "$selected" ]]; then
+        exit 0
+    fi
+    
+    if [[ "$selected" == "+ 새 세션 생성" ]]; then
+        read -p "새 세션 이름: " session_name
+        if [[ -n "$session_name" ]]; then
+            tmux new-session -s "$session_name"
+        fi
+    else
+        tmux attach-session -t "$selected"
+    fi
+fi

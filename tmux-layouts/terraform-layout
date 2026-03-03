@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+
+SESSION_NAME="$1"
+PROJECT_DIR="${2:-$PWD}"
+
+# 세션이 이미 있으면 종료
+if tmux has-session -t="$SESSION_NAME" 2> /dev/null; then
+    echo "Session $SESSION_NAME already exists"
+    exit 0
+fi
+
+# 새 세션 생성
+tmux new-session -d -s "$SESSION_NAME" -c "$PROJECT_DIR" -n "terraform"
+
+# 윈도우 1: 코드 편집 (nvim)
+tmux send-keys -t "$SESSION_NAME:1" "nvim" C-m
+
+# 새 윈도우: Terraform 명령어
+tmux new-window -t "$SESSION_NAME:2" -n "tf-commands" -c "$PROJECT_DIR"
+tmux send-keys -t "$SESSION_NAME:2" "# Terraform commands" C-m
+
+# 세로 분할
+tmux split-window -h -t "$SESSION_NAME:2" -c "$PROJECT_DIR"
+tmux send-keys -t "$SESSION_NAME:2.2" "# Logs / Outputs" C-m
+
+# 첫 번째 윈도우로 이동
+tmux select-window -t "$SESSION_NAME:1"
+
+# 세션으로 전환
+tmux switch-client -t "$SESSION_NAME" 2>/dev/null || tmux attach-session -t "$SESSION_NAME"

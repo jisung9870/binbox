@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+
+if [[ -z "$1" ]]; then
+    echo "사용법: tmux-kill-pattern <패턴>"
+    echo "예시: tmux-kill-pattern k8s"
+    exit 1
+fi
+
+PATTERN="$1"
+
+# 패턴에 매칭되는 세션 찾기
+sessions=$(tmux list-sessions -F "#{session_name}" 2>/dev/null | grep "$PATTERN")
+
+if [[ -z "$sessions" ]]; then
+    echo "패턴 '$PATTERN'에 매칭되는 세션이 없습니다."
+    exit 0
+fi
+
+echo "다음 세션들을 제거합니다:"
+echo "$sessions"
+echo ""
+read -p "계속하시겠습니까? (y/n) " -n 1 -r
+echo
+
+if [[ $REPLY =~ ^[Yy]$ ]]; then
+    echo "$sessions" | while read -r session; do
+        tmux kill-session -t "$session"
+        echo "✓ $session 제거됨"
+    done
+else
+    echo "취소됨"
+fi

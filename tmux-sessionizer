@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+
+# 프로젝트 디렉토리 목록 (본인 환경에 맞게 수정)
+PROJECT_DIRS=(
+  "$HOME/home/projects"
+  "$HOME/home/work"
+  "$HOME/home/lab"
+  "$HOME/.config"
+)
+
+# fzf 없으면 에러
+if ! command -v fzf &>/dev/null; then
+  echo "fzf가 설치되지 않았습니다. 'brew install fzf'로 설치하세요."
+  exit 1
+fi
+
+# 모든 프로젝트 디렉토리 찾기
+selected=$(find "${PROJECT_DIRS[@]}" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | fzf)
+
+if [[ -z $selected ]]; then
+  exit 0
+fi
+
+# 세션 이름 생성 (경로의 마지막 부분, 특수문자 제거)
+selected_name=$(basename "$selected" | tr . _)
+
+# tmux 안에 있는지 확인
+tmux_running=$(pgrep tmux)
+
+# tmux 안에 있지 않고 tmux가 실행 중이 아니면
+if [[ -z $TMUX ]] && [[ -z $tmux_running ]]; then
+  tmux new-session -s "$selected_name" -c "$selected"
+  exit 0
+fi
+
+# 세션이 이미 있는지 확인
+if ! tmux has-session -t="$selected_name" 2>/dev/null; then
+  tmux new-session -ds "$selected_name" -c "$selected"
+fi
+
+# 세션으로 전환
+tmux switch-client -t "$selected_name"

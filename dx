@@ -1,0 +1,26 @@
+#!/bin/bash
+
+set -e
+
+TOOL="${1:-}"
+SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
+CONFIG_DIR="${SCRIPT_DIR}/dx.d"
+
+if [[ -z "$TOOL" ]]; then
+  echo "Usage: dx <tool> [args...]"
+  echo "Available tools:"
+  ls -1 "$CONFIG_DIR" 2>/dev/null || echo " (none)"
+  exit 1
+fi
+
+if [[ ! -f "$CONFIG_DIR/$TOOL" ]]; then
+  echo "Error: Unkown tool '$TOOL'"
+  exit 1
+fi
+
+DOCKER_IMAGE=""
+DOCKER_OPTS=()
+
+source "$CONFIG_DIR/$TOOL"
+shift
+docker run --rm -it -v "$(pwd):/work" -w /work "${DOCKER_OPTS[@]}" "$DOCKER_IMAGE" "${@:-bash}"

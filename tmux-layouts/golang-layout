@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+
+SESSION_NAME="$1"
+PROJECT_DIR="${2:-$PWD}"
+
+# 세션이 이미 있으면 종료
+if tmux has-session -t="$SESSION_NAME" 2> /dev/null; then
+    echo "Session $SESSION_NAME already exists"
+    exit 0
+fi
+
+# 새 세션 생성
+tmux new-session -d -s "$SESSION_NAME" -c "$PROJECT_DIR" -n "editor"
+
+# 윈도우 1: nvim
+tmux send-keys -t "$SESSION_NAME:1" "nvim" C-m
+
+# 새 윈도우: 테스트 & 실행
+tmux new-window -t "$SESSION_NAME:2" -n "dev" -c "$PROJECT_DIR"
+tmux send-keys -t "$SESSION_NAME:2" "# go run / go test" C-m
+
+# 가로 분할 (하단에 로그/출력)
+tmux split-window -v -t "$SESSION_NAME:2" -c "$PROJECT_DIR"
+tmux send-keys -t "$SESSION_NAME:2.2" "# output / logs" C-m
+
+# 첫 번째 윈도우로
+tmux select-window -t "$SESSION_NAME:1"
+
+# 세션으로 전환
+tmux switch-client -t "$SESSION_NAME" 2>/dev/null || tmux attach-session -t "$SESSION_NAME"

@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+
+# fzf로 삭제할 세션 선택
+sessions=$(tmux list-sessions -F "#{session_name}" 2>/dev/null)
+
+if [[ -z "$sessions" ]]; then
+    echo "실행 중인 세션이 없습니다."
+    exit 0
+fi
+
+# 다중 선택 가능
+to_kill=$(echo "$sessions" | fzf --multi --prompt="삭제할 세션 선택 (Tab으로 다중 선택): ")
+
+if [[ -z "$to_kill" ]]; then
+    echo "선택 취소"
+    exit 0
+fi
+
+# 선택한 세션들 제거
+echo "$to_kill" | while read -r session; do
+    tmux kill-session -t "$session"
+    echo "✓ $session 제거됨"
+done

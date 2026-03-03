@@ -1,0 +1,4 @@
+DOCKER_IMAGE="ghcr.io/jisung9870/binbox-anslbie:v10.4.0-2.17"
+DOCKER_OPTS=(
+  -v "$HOME/.ssh:/root/.ssh"
+)
