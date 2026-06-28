@@ -68,6 +68,10 @@ dx terraform plan
 dx golang go test ./...
 ```
 
+`dx`는 터미널에서 실행할 때만 Docker에 `-it`를 전달하고, 파이프/CI 같은
+비대화형 실행에서는 `-i`만 사용한다. 각 `dx.d/*` 설정은 `DOCKER_IMAGE`와
+배열 형태의 `DOCKER_OPTS`가 필요하다.
+
 ### 도구 추가 방법
 
 `dx.d/` 디렉토리에 파일을 만들고 `DOCKER_IMAGE`와 `DOCKER_OPTS`를 정의한다.
@@ -177,14 +181,20 @@ tfsum md plan-summary.md
 
 ## 요구 사항
 
+`binbox-doctor`는 core dependency 누락만 실패로 처리하고, optional dependency는
+경고로만 표시한다.
+
+Core:
 - Docker
 - tmux
 - fzf (`brew install fzf`)
+- lsof (portcheck 사용 시, macOS 기본 포함)
+
+Optional:
 - kubectl (kctx, kns 사용 시)
 - terraform, tf-summarize (tfplan, tfsum 사용 시)
-- lsof (portcheck 사용 시, macOS 기본 포함)
-- ss/iproute2 (Linux portcheck 사용 시, 없으면 lsof로 대체)
 - shellcheck (개발/검증 시 선택)
+- ss/iproute2 (Linux portcheck 사용 시, 없으면 lsof로 대체)
 
 ## 설치
 

@@ -72,7 +72,7 @@ record_recent() {
   {
     printf '%s\n' "$selected_path"
     if [[ -f "$RECENT_FILE" ]]; then
-      grep -Fxv "$selected_path" "$RECENT_FILE" | while IFS= read -r recent; do
+      { grep -Fxv "$selected_path" "$RECENT_FILE" || true; } | while IFS= read -r recent; do
         [[ -d "$recent" ]] && printf '%s\n' "$recent"
       done
     fi
@@ -80,7 +80,13 @@ record_recent() {
   mv "${RECENT_FILE}.tmp" "$RECENT_FILE"
 }
 
-selected=$(ordered_candidates | fzf || true)
+candidates=$(ordered_candidates)
+if [[ -z "$candidates" ]]; then
+  echo "선택할 프로젝트가 없습니다. 프로젝트 디렉토리에 하위 디렉토리를 추가하세요." >&2
+  exit 1
+fi
+
+selected=$(printf '%s\n' "$candidates" | fzf || true)
 
 if [[ -z $selected ]]; then
   exit 0

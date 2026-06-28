@@ -52,17 +52,25 @@ echo "$result"
 
 if [[ "$KILL" == "--kill" ]]; then
   echo ""
-  if [[ "$(uname)" == "Darwin" ]]; then
-    pid=$(lsof -i :"$PORT" -P -n -t 2>/dev/null | head -1 || true)
-  else
-    pid=$(lsof -i :"$PORT" -P -n -t 2>/dev/null | head -1 || true)
-  fi
+  pids=$(lsof -i :"$PORT" -P -n -t 2>/dev/null | awk 'NF && !seen[$0]++ {print}' || true)
 
-  if [[ -n "$pid" ]]; then
-    read -r -p "PID $pid 를 종료하시겠습니까? (y/n) " -n 1
+  if [[ -n "$pids" ]]; then
+    echo "종료 대상 PID:"
+    printf '%s\n' "$pids"
+    read -r -p "위 PID를 모두 종료하시겠습니까? (y/n) " -n 1
     echo
     if [[ $REPLY =~ ^[Yy]$ ]]; then
-      kill "$pid" && echo "✓ PID $pid 종료됨"
+      failed=0
+      while IFS= read -r pid; do
+        [[ -n "$pid" ]] || continue
+        if kill "$pid"; then
+          echo "✓ PID $pid 종료됨"
+        else
+          echo "✗ PID $pid 종료 실패" >&2
+          failed=1
+        fi
+      done <<<"$pids"
+      exit "$failed"
     fi
   fi
 fi

@@ -36,12 +36,17 @@ load_tool() {
     exit 1
   fi
 
+  unset DOCKER_IMAGE DOCKER_OPTS
   DOCKER_IMAGE=""
   DOCKER_OPTS=()
 
   # shellcheck source=/dev/null
   source "$CONFIG_DIR/$tool"
   [[ -n "$DOCKER_IMAGE" ]] || { echo "DOCKER_IMAGE is not set in $CONFIG_DIR/$tool" >&2; exit 1; }
+  if ! declare -p DOCKER_OPTS 2>/dev/null | grep -q '^declare \-[^ ]*a[^ ]* DOCKER_OPTS='; then
+    echo "DOCKER_OPTS must be an array in $CONFIG_DIR/$tool" >&2
+    exit 1
+  fi
 }
 
 tool_help() {
@@ -50,6 +55,7 @@ tool_help() {
 
   echo "Tool: $tool"
   echo "Image: $DOCKER_IMAGE"
+  echo "Config: ok"
   if [[ -f "$IMAGE_DIR/$tool/Dockerfile" ]]; then
     echo "Build: dx --build $tool"
   else
@@ -118,4 +124,13 @@ shift
 if [[ $# -eq 0 ]]; then
   set -- bash
 fi
-docker run --rm -it -v "$(pwd):/work" -w /work "${DOCKER_OPTS[@]}" "$DOCKER_IMAGE" "$@"
+docker_tty_opts=(-i)
+if [[ -t 0 && -t 1 ]]; then
+  docker_tty_opts=(-it)
+fi
+docker_args=(run --rm "${docker_tty_opts[@]}" -v "$(pwd):/work" -w /work)
+if ((${#DOCKER_OPTS[@]})); then
+  docker_args+=("${DOCKER_OPTS[@]}")
+fi
+docker_args+=("$DOCKER_IMAGE" "$@")
+docker "${docker_args[@]}"
