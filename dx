@@ -1,27 +1,38 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
-set -e
+set -euo pipefail
 
 TOOL="${1:-}"
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 CONFIG_DIR="${SCRIPT_DIR}/dx.d"
 
-if [[ -z "$TOOL" ]]; then
+usage() {
   echo "Usage: dx <tool> [args...]"
   echo "Available tools:"
-  ls -1 "$CONFIG_DIR" 2>/dev/null || echo " (none)"
+  find "$CONFIG_DIR" -maxdepth 1 -type f -print 2>/dev/null | sed 's#.*/##' | sort || echo " (none)"
+}
+
+if [[ -z "$TOOL" ]]; then
+  usage
   exit 1
 fi
 
 if [[ ! -f "$CONFIG_DIR/$TOOL" ]]; then
-  echo "Error: Unkown tool '$TOOL'"
+  echo "Error: Unknown tool '$TOOL'" >&2
+  usage >&2
   exit 1
 fi
+
+command -v docker >/dev/null || { echo "docker not found in PATH" >&2; exit 1; }
 
 DOCKER_IMAGE=""
 DOCKER_OPTS=()
 
 # shellcheck source=/dev/null
 source "$CONFIG_DIR/$TOOL"
+[[ -n "$DOCKER_IMAGE" ]] || { echo "DOCKER_IMAGE is not set in $CONFIG_DIR/$TOOL" >&2; exit 1; }
 shift
-docker run --rm -it -v "$(pwd):/work" -w /work "${DOCKER_OPTS[@]}" "$DOCKER_IMAGE" "${@:-bash}"
+if [[ $# -eq 0 ]]; then
+  set -- bash
+fi
+docker run --rm -it -v "$(pwd):/work" -w /work "${DOCKER_OPTS[@]}" "$DOCKER_IMAGE" "$@"

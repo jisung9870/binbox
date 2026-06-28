@@ -1,24 +1,44 @@
 #!/usr/bin/env bash
 # portcheck — 특정 포트를 사용 중인 프로세스 확인
+set -euo pipefail
 
-if [[ -z "$1" ]]; then
+usage() {
   echo "사용법: portcheck <포트번호> [--kill]"
   echo "예시: portcheck 8080"
   echo "      portcheck 3000 --kill"
+}
+
+if [[ -z "${1:-}" ]]; then
+  usage
   exit 1
 fi
 
 PORT="$1"
 KILL="${2:-}"
 
+if [[ ! "$PORT" =~ ^[0-9]+$ ]] || ((PORT < 1 || PORT > 65535)); then
+  echo "올바른 포트 번호가 아닙니다: $PORT" >&2
+  usage >&2
+  exit 1
+fi
+
+if [[ -n "$KILL" && "$KILL" != "--kill" ]]; then
+  echo "알 수 없는 옵션: $KILL" >&2
+  usage >&2
+  exit 1
+fi
+
+command -v lsof >/dev/null || { echo "lsof not found in PATH" >&2; exit 1; }
+
 if [[ "$(uname)" == "Darwin" ]]; then
-  # macOS
-  result=$(lsof -i :"$PORT" -P -n 2>/dev/null)
+  result=$(lsof -i :"$PORT" -P -n 2>/dev/null || true)
 else
-  # Linux
-  result=$(ss -tlnp "sport = :$PORT" 2>/dev/null)
-  if [[ -z "$result" ]] || [[ "$result" == *"State"* && $(echo "$result" | wc -l) -le 1 ]]; then
-    result=$(lsof -i :"$PORT" -P -n 2>/dev/null)
+  result=""
+  if command -v ss >/dev/null; then
+    result=$(ss -tlnp "sport = :$PORT" 2>/dev/null || true)
+  fi
+  if [[ -z "$result" ]] || [[ "$result" == *"State"* && $(printf '%s\n' "$result" | wc -l) -le 1 ]]; then
+    result=$(lsof -i :"$PORT" -P -n 2>/dev/null || true)
   fi
 fi
 
@@ -33,13 +53,13 @@ echo "$result"
 if [[ "$KILL" == "--kill" ]]; then
   echo ""
   if [[ "$(uname)" == "Darwin" ]]; then
-    pid=$(lsof -i :"$PORT" -P -n -t 2>/dev/null | head -1)
+    pid=$(lsof -i :"$PORT" -P -n -t 2>/dev/null | head -1 || true)
   else
-    pid=$(lsof -i :"$PORT" -P -n -t 2>/dev/null | head -1)
+    pid=$(lsof -i :"$PORT" -P -n -t 2>/dev/null | head -1 || true)
   fi
 
   if [[ -n "$pid" ]]; then
-    read -p "PID $pid 를 종료하시겠습니까? (y/n) " -n 1 -r
+    read -r -p "PID $pid 를 종료하시겠습니까? (y/n) " -n 1
     echo
     if [[ $REPLY =~ ^[Yy]$ ]]; then
       kill "$pid" && echo "✓ PID $pid 종료됨"

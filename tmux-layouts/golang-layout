@@ -1,7 +1,12 @@
 #!/usr/bin/env bash
+set -euo pipefail
 
-SESSION_NAME="$1"
+SESSION_NAME="${1:-}"
 PROJECT_DIR="${2:-$PWD}"
+
+[[ -n "$SESSION_NAME" ]] || { echo "사용법: golang-layout <session-name> [project-dir]" >&2; exit 1; }
+[[ -d "$PROJECT_DIR" ]] || { echo "프로젝트 디렉토리가 없습니다: $PROJECT_DIR" >&2; exit 1; }
+command -v tmux >/dev/null || { echo "tmux가 설치되지 않았습니다." >&2; exit 1; }
 
 # 세션이 이미 있으면 종료
 if tmux has-session -t="$SESSION_NAME" 2> /dev/null; then

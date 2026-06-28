@@ -23,7 +23,8 @@ Subcommands:
   draw          ASCII 트리 그림으로 시각화 (tree + -draw)
                 예) tfsum draw
 
-  md [outfile]  마크다운 테이블 출력. PR 본문/문서 공유용
+  md [outfile] [planfile]
+                마크다운 테이블 출력. PR 본문/문서 공유용
                 예) tfsum md                  → stdout
                     tfsum md plan-summary.md  → 파일로 저장
 
@@ -42,10 +43,6 @@ Examples:
 EOF
 }
 
-for cmd in terraform tf-summarize; do
-  command -v "$cmd" >/dev/null || { echo "$cmd not found in PATH" >&2; exit 1; }
-done
-
 case "${1:-}" in
   -h|--help|help) usage; exit 0 ;;
 esac
@@ -57,18 +54,38 @@ PLAN_FILE="${TFPLAN_FILE:-tfplan}"
 EXTRA_OUT=""
 case "$SUB" in
   md)
-    if [[ $# -gt 0 && ! -f "$1" ]]; then
-      EXTRA_OUT="-out=$1"
+    case $# in
+      0) ;;
+      1)
+        if [[ -f "$1" && "$(basename "$1")" == "tfplan" ]]; then
+          PLAN_FILE="$1"
+        else
+          EXTRA_OUT="-out=$1"
+        fi
+        ;;
+      2)
+        EXTRA_OUT="-out=$1"
+        PLAN_FILE="$2"
+        ;;
+      *)
+        echo "unexpected argument: $3" >&2
+        usage >&2
+        exit 2
+        ;;
+    esac
+    ;;
+  *)
+    if [[ $# -gt 0 && -f "$1" ]]; then
+      PLAN_FILE="$1"
       shift
+    fi
+    if [[ $# -gt 0 ]]; then
+      echo "unexpected argument: $1" >&2
+      usage >&2
+      exit 2
     fi
     ;;
 esac
-if [[ $# -gt 0 && -f "$1" ]]; then
-  PLAN_FILE="$1"
-  shift
-fi
-
-[[ -f "$PLAN_FILE" ]] || { echo "plan file not found: $PLAN_FILE (run 'tfplan' first)" >&2; exit 1; }
 
 case "$SUB" in
   summary) FLAGS=() ;;
@@ -79,6 +96,12 @@ case "$SUB" in
   json)    FLAGS=(-json) ;;
   *) echo "unknown subcommand: $SUB" >&2; usage; exit 2 ;;
 esac
+
+[[ -f "$PLAN_FILE" ]] || { echo "plan file not found: $PLAN_FILE (run 'tfplan' first)" >&2; exit 1; }
+
+for cmd in terraform tf-summarize; do
+  command -v "$cmd" >/dev/null || { echo "$cmd not found in PATH" >&2; exit 1; }
+done
 
 [[ -n "$EXTRA_OUT" ]] && FLAGS+=("$EXTRA_OUT")
 

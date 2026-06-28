@@ -165,6 +165,9 @@ tfsum md plan-summary.md
 - fzf (`brew install fzf`)
 - kubectl (kctx, kns 사용 시)
 - terraform, tf-summarize (tfplan, tfsum 사용 시)
+- lsof (portcheck 사용 시, macOS 기본 포함)
+- ss/iproute2 (Linux portcheck 사용 시, 없으면 lsof로 대체)
+- shellcheck (개발/검증 시 선택)
 
 ## 설치
 
@@ -176,6 +179,6 @@ echo 'export PATH="$HOME/binbox:$PATH"' >> ~/.zshrc
 source ~/.zshrc
 
 # 실행 권한 부여
-chmod +x ~/binbox/*
-chmod +x ~/binbox/tmux-layouts/*
+find ~/binbox -maxdepth 1 -type f -exec chmod +x {} \;
+find ~/binbox/tmux-layouts -maxdepth 1 -type f -exec chmod +x {} \;
 ```

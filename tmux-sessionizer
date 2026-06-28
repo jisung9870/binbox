@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
+set -euo pipefail
 
 CONFIG_FILE="${XDG_CONFIG_HOME:-$HOME/.config}/tmux-sessionizer/dirs"
 
 if [[ -f "$CONFIG_FILE" ]]; then
   PROJECT_DIRS=()
   while IFS= read -r line; do
+    [[ -z "$line" || "$line" == \#* ]] && continue
     line="${line/#\~/$HOME}"
     PROJECT_DIRS+=("$line")
   done <"$CONFIG_FILE"
@@ -12,35 +14,38 @@ else
   PROJECT_DIRS=("$HOME/home/projects" "$HOME/home/work")
 fi
 
-# fzf 없으면 에러
+command -v tmux >/dev/null || { echo "tmux가 설치되지 않았습니다." >&2; exit 1; }
 if ! command -v fzf &>/dev/null; then
   echo "fzf가 설치되지 않았습니다. 'brew install fzf'로 설치하세요."
   exit 1
 fi
 
-# 모든 프로젝트 디렉토리 찾기
-selected=$(find "${PROJECT_DIRS[@]}" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | fzf)
+if [[ ${#PROJECT_DIRS[@]} -eq 0 ]]; then
+  echo "프로젝트 디렉토리가 설정되어 있지 않습니다: $CONFIG_FILE" >&2
+  exit 1
+fi
+
+selected=$(find "${PROJECT_DIRS[@]}" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | fzf || true)
 
 if [[ -z $selected ]]; then
   exit 0
 fi
 
-# 세션 이름 생성 (경로의 마지막 부분, 특수문자 제거)
-selected_name=$(basename "$selected" | tr . _)
+selected_name=$(basename "$selected" | tr '.:' '__')
 
-# tmux 안에 있는지 확인
-tmux_running=$(pgrep tmux)
+tmux_running=$(pgrep tmux || true)
 
-# tmux 안에 있지 않고 tmux가 실행 중이 아니면
-if [[ -z $TMUX ]] && [[ -z $tmux_running ]]; then
+if [[ -z ${TMUX:-} ]] && [[ -z $tmux_running ]]; then
   tmux new-session -s "$selected_name" -c "$selected"
   exit 0
 fi
 
-# 세션이 이미 있는지 확인
 if ! tmux has-session -t="$selected_name" 2>/dev/null; then
   tmux new-session -ds "$selected_name" -c "$selected"
 fi
 
-# 세션으로 전환
-tmux switch-client -t "$selected_name"
+if [[ -n ${TMUX:-} ]]; then
+  tmux switch-client -t "$selected_name"
+else
+  tmux attach-session -t "$selected_name"
+fi
