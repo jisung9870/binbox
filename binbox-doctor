@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+missing=0
+
+check_cmd() {
+  local name="$1" scope="$2" hint="${3:-}"
+
+  if command -v "$name" >/dev/null 2>&1; then
+    printf '✓ %-13s %s\n' "$name" "$scope"
+  else
+    printf '✗ %-13s %s' "$name" "$scope"
+    if [[ -n "$hint" ]]; then
+      printf ' (%s)' "$hint"
+    fi
+    printf '\n'
+    missing=1
+  fi
+}
+
+echo "binbox doctor"
+echo
+echo "Core tools"
+check_cmd docker "dx container runner" "brew install --cask docker"
+check_cmd tmux "tmux helpers" "brew install tmux"
+check_cmd fzf "interactive selectors" "brew install fzf"
+check_cmd lsof "portcheck" "usually preinstalled on macOS"
+
+echo
+echo "Optional tools"
+check_cmd kubectl "kctx/kns" "brew install kubectl"
+check_cmd terraform "tfplan/tfsum" "brew install terraform"
+check_cmd tf-summarize "tfsum" "install tf-summarize"
+check_cmd shellcheck "binbox-check" "brew install shellcheck"
+
+echo
+if ((missing)); then
+  echo "Some dependencies are missing."
+  exit 1
+fi
+
+echo "All checked dependencies are installed."

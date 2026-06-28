@@ -2,6 +2,8 @@
 set -euo pipefail
 
 CONFIG_FILE="${XDG_CONFIG_HOME:-$HOME/.config}/tmux-sessionizer/dirs"
+STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/tmux-sessionizer"
+RECENT_FILE="$STATE_DIR/recent"
 
 if [[ -f "$CONFIG_FILE" ]]; then
   PROJECT_DIRS=()
@@ -25,11 +27,66 @@ if [[ ${#PROJECT_DIRS[@]} -eq 0 ]]; then
   exit 1
 fi
 
-selected=$(find "${PROJECT_DIRS[@]}" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | fzf || true)
+valid_dirs=()
+for dir in "${PROJECT_DIRS[@]}"; do
+  if [[ -d "$dir" ]]; then
+    valid_dirs+=("$dir")
+  fi
+done
+
+if [[ ${#valid_dirs[@]} -eq 0 ]]; then
+  echo "사용 가능한 프로젝트 디렉토리가 없습니다." >&2
+  echo "설정 파일을 확인하세요: $CONFIG_FILE" >&2
+  exit 1
+fi
+
+read_candidates() {
+  find "${valid_dirs[@]}" -mindepth 1 -maxdepth 1 -type d ! -name '.*' -print 2>/dev/null | sort -u
+}
+
+ordered_candidates() {
+  local candidates
+  candidates=$(read_candidates)
+  [[ -n "$candidates" ]] || return 0
+
+  if [[ -f "$RECENT_FILE" ]]; then
+    while IFS= read -r recent; do
+      [[ -n "$recent" ]] || continue
+      if printf '%s\n' "$candidates" | grep -Fxq "$recent"; then
+        printf '%s\n' "$recent"
+      fi
+    done <"$RECENT_FILE"
+  fi
+
+  printf '%s\n' "$candidates" | while IFS= read -r candidate; do
+    if [[ -f "$RECENT_FILE" ]] && grep -Fxq "$candidate" "$RECENT_FILE"; then
+      continue
+    fi
+    printf '%s\n' "$candidate"
+  done
+}
+
+record_recent() {
+  local selected_path="$1"
+  mkdir -p "$STATE_DIR"
+  {
+    printf '%s\n' "$selected_path"
+    if [[ -f "$RECENT_FILE" ]]; then
+      grep -Fxv "$selected_path" "$RECENT_FILE" | while IFS= read -r recent; do
+        [[ -d "$recent" ]] && printf '%s\n' "$recent"
+      done
+    fi
+  } | awk 'NF && !seen[$0]++ {print}' | head -50 >"${RECENT_FILE}.tmp"
+  mv "${RECENT_FILE}.tmp" "$RECENT_FILE"
+}
+
+selected=$(ordered_candidates | fzf || true)
 
 if [[ -z $selected ]]; then
   exit 0
 fi
+
+record_recent "$selected"
 
 selected_name=$(basename "$selected" | tr '.:' '__')
 

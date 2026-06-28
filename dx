@@ -5,11 +5,74 @@ set -euo pipefail
 TOOL="${1:-}"
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 CONFIG_DIR="${SCRIPT_DIR}/dx.d"
+IMAGE_DIR="${SCRIPT_DIR}/images"
 
 usage() {
-  echo "Usage: dx <tool> [args...]"
-  echo "Available tools:"
-  find "$CONFIG_DIR" -maxdepth 1 -type f -print 2>/dev/null | sed 's#.*/##' | sort || echo " (none)"
+  cat <<'EOF'
+Usage:
+  dx --list
+  dx --help [tool]
+  dx --build <tool>
+  dx <tool> [args...]
+
+Examples:
+  dx --list
+  dx --help ansible
+  dx --build ansible
+  dx terraform plan
+  dx ubuntu
+EOF
+}
+
+list_tools() {
+  find "$CONFIG_DIR" -maxdepth 1 -type f -print 2>/dev/null | sed 's#.*/##' | sort
+}
+
+load_tool() {
+  local tool="$1"
+  if [[ ! -f "$CONFIG_DIR/$tool" ]]; then
+    echo "Error: Unknown tool '$tool'" >&2
+    usage >&2
+    exit 1
+  fi
+
+  DOCKER_IMAGE=""
+  DOCKER_OPTS=()
+
+  # shellcheck source=/dev/null
+  source "$CONFIG_DIR/$tool"
+  [[ -n "$DOCKER_IMAGE" ]] || { echo "DOCKER_IMAGE is not set in $CONFIG_DIR/$tool" >&2; exit 1; }
+}
+
+tool_help() {
+  local tool="$1"
+  load_tool "$tool"
+
+  echo "Tool: $tool"
+  echo "Image: $DOCKER_IMAGE"
+  if [[ -f "$IMAGE_DIR/$tool/Dockerfile" ]]; then
+    echo "Build: dx --build $tool"
+  else
+    echo "Build: no local Dockerfile at images/$tool/Dockerfile"
+  fi
+  echo
+  echo "Run:"
+  echo "  dx $tool [args...]"
+  echo "  dx $tool"
+}
+
+build_tool() {
+  local tool="$1"
+  load_tool "$tool"
+
+  local dockerfile_dir="$IMAGE_DIR/$tool"
+  if [[ ! -f "$dockerfile_dir/Dockerfile" ]]; then
+    echo "No local Dockerfile for '$tool': $dockerfile_dir/Dockerfile" >&2
+    exit 1
+  fi
+
+  command -v docker >/dev/null || { echo "docker not found in PATH" >&2; exit 1; }
+  docker build -t "$DOCKER_IMAGE" "$dockerfile_dir"
 }
 
 if [[ -z "$TOOL" ]]; then
@@ -17,20 +80,40 @@ if [[ -z "$TOOL" ]]; then
   exit 1
 fi
 
-if [[ ! -f "$CONFIG_DIR/$TOOL" ]]; then
-  echo "Error: Unknown tool '$TOOL'" >&2
-  usage >&2
-  exit 1
-fi
+case "$TOOL" in
+  --list|list)
+    list_tools
+    exit 0
+    ;;
+  -h|--help|help)
+    if [[ -n "${2:-}" ]]; then
+      tool_help "$2"
+    else
+      usage
+      echo
+      echo "Available tools:"
+      tools=$(list_tools)
+      if [[ -n "$tools" ]]; then
+        echo "$tools"
+      else
+        echo " (none)"
+      fi
+    fi
+    exit 0
+    ;;
+  --build|build)
+    if [[ -z "${2:-}" ]]; then
+      echo "Usage: dx --build <tool>" >&2
+      exit 1
+    fi
+    build_tool "$2"
+    exit 0
+    ;;
+esac
 
 command -v docker >/dev/null || { echo "docker not found in PATH" >&2; exit 1; }
 
-DOCKER_IMAGE=""
-DOCKER_OPTS=()
-
-# shellcheck source=/dev/null
-source "$CONFIG_DIR/$TOOL"
-[[ -n "$DOCKER_IMAGE" ]] || { echo "DOCKER_IMAGE is not set in $CONFIG_DIR/$TOOL" >&2; exit 1; }
+load_tool "$TOOL"
 shift
 if [[ $# -eq 0 ]]; then
   set -- bash

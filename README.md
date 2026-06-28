@@ -11,6 +11,8 @@ export PATH="$HOME/binbox:$PATH"
 
 ```
 binbox/
+├── binbox-check            # 개발용 shellcheck 일괄 실행
+├── binbox-doctor           # 로컬 의존성 점검
 ├── dx                      # Docker 기반 도구 실행기
 ├── dx.d/                   # dx 도구 설정 디렉토리
 │   ├── ansible
@@ -44,7 +46,14 @@ binbox/
 
 ```bash
 # 사용 가능한 도구 목록
-dx
+dx --list
+
+# 전체/도구별 도움말
+dx --help
+dx --help ansible
+
+# 로컬 Dockerfile이 있는 도구 빌드
+dx --build ansible
 
 # ansible 실행
 dx ansible ansible-playbook site.yml
@@ -119,6 +128,8 @@ EOF
 ```
 
 설정 파일이 없으면 스크립트 내 기본 경로(`~/home/projects`, `~/home/work`)를 사용한다.
+프로젝트 목록은 hidden 디렉토리를 제외하고 표시하며, 최근 선택한 프로젝트는
+`$XDG_STATE_HOME/tmux-sessionizer/recent` 또는 `~/.local/state/tmux-sessionizer/recent`에 저장되어 다음 실행 때 먼저 표시된다.
 
 ### 레이아웃 추가
 
@@ -141,6 +152,12 @@ kns monitoring
 ## 기타 유틸리티
 
 ```bash
+# 로컬 의존성 점검
+binbox-doctor
+
+# 개발용 shellcheck 일괄 실행
+binbox-check
+
 # 포트 사용 프로세스 확인
 portcheck 8080
 
