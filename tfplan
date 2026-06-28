@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# tfplan — terraform plan을 tfplan 파일로 저장
+# Usage:
+#   tfplan                       # terraform plan -out=tfplan
+#   tfplan -var-file=qa.tfvars   # 추가 인자 패스스루
+#   tfplan -target=aws_xxx.yyy   # 특정 리소스만
+set -euo pipefail
+
+command -v terraform >/dev/null || { echo "terraform not found" >&2; exit 1; }
+
+PLAN_FILE="${TFPLAN_FILE:-tfplan}"
+terraform plan -out="$PLAN_FILE" "$@"
+echo
+echo "✔ saved: $PLAN_FILE   (run: tfsum [tree|stree|draw|md|json])"

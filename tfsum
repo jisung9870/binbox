@@ -1,0 +1,85 @@
+#!/usr/bin/env bash
+# tfsum — tf-summarize 래퍼 (terraform show -json | tf-summarize ... 의 단축)
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+tfsum — tf-summarize wrapper
+
+Usage:
+  tfsum [subcommand] [planfile]
+
+Subcommands:
+  (없음)        기본 요약 테이블 (add/change/destroy 카운트 + 리소스 목록)
+                예) tfsum
+
+  tree          중첩 트리 뷰. 모듈/리소스 계층 구조를 한눈에 파악
+                예) tfsum tree
+
+  stree         action별 분리 트리 (add/delete/change/recreate 각각)
+                대규모 plan에서 변경 유형별로 보고 싶을 때
+                예) tfsum stree
+
+  draw          ASCII 트리 그림으로 시각화 (tree + -draw)
+                예) tfsum draw
+
+  md [outfile]  마크다운 테이블 출력. PR 본문/문서 공유용
+                예) tfsum md                  → stdout
+                    tfsum md plan-summary.md  → 파일로 저장
+
+  json          JSON 출력 (jq 등 후속 파이프용)
+                예) tfsum json | jq '.'
+
+Planfile:
+  기본값은 ./tfplan. 환경변수 TFPLAN_FILE 또는 마지막 인자로 지정 가능.
+  예) tfsum tree ./other.tfplan
+      TFPLAN_FILE=./qa.tfplan tfsum md
+
+Examples:
+  tfplan && tfsum tree           # plan 후 트리 뷰
+  tfplan -var-file=qa.tfvars && tfsum stree
+  tfsum md plan.md && cat plan.md
+EOF
+}
+
+for cmd in terraform tf-summarize; do
+  command -v "$cmd" >/dev/null || { echo "$cmd not found in PATH" >&2; exit 1; }
+done
+
+case "${1:-}" in
+  -h|--help|help) usage; exit 0 ;;
+esac
+
+SUB="${1:-summary}"
+[[ $# -gt 0 ]] && shift || true
+
+PLAN_FILE="${TFPLAN_FILE:-tfplan}"
+EXTRA_OUT=""
+case "$SUB" in
+  md)
+    if [[ $# -gt 0 && ! -f "$1" ]]; then
+      EXTRA_OUT="-out=$1"
+      shift
+    fi
+    ;;
+esac
+if [[ $# -gt 0 && -f "$1" ]]; then
+  PLAN_FILE="$1"
+  shift
+fi
+
+[[ -f "$PLAN_FILE" ]] || { echo "plan file not found: $PLAN_FILE (run 'tfplan' first)" >&2; exit 1; }
+
+case "$SUB" in
+  summary) FLAGS=() ;;
+  tree)    FLAGS=(-tree) ;;
+  stree)   FLAGS=(-separate-tree) ;;
+  draw)    FLAGS=(-tree -draw) ;;
+  md)      FLAGS=(-md) ;;
+  json)    FLAGS=(-json) ;;
+  *) echo "unknown subcommand: $SUB" >&2; usage; exit 2 ;;
+esac
+
+[[ -n "$EXTRA_OUT" ]] && FLAGS+=("$EXTRA_OUT")
+
+terraform show -json "$PLAN_FILE" | tf-summarize "${FLAGS[@]}"

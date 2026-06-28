@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# md2jira — md-to-jiratext CLI launcher
+# 프로젝트 위치가 다르면 MD2JIRA_HOME 환경변수로 덮어쓸 수 있다.
+set -euo pipefail
+MD2JIRA_HOME="${MD2JIRA_HOME:-$HOME/home/lab/md-to-jiratext}"
+exec "$MD2JIRA_HOME/.venv/bin/md2jira" "$@"

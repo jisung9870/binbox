@@ -1,0 +1,247 @@
+#!/usr/bin/env bash
+set -uo pipefail
+
+AI_COMMAND_PATTERN='claude|codex|node'
+AI_CONTENT_HINT='esc to interrupt|ctx:|Welcome back|Claude Code|for agents|tokens'
+CAPTURE_LINES=16
+PAT_RUNNING='Working \(|esc to interrupt|\((esc|ctrl\+c) to|[↑↓] ?[0-9.]+k? tokens?\)|[0-9]+% context left'
+PAT_WAITING='Would you like to run|Press enter to confirm|Do you want to proceed|❯ 1\. Yes|Yes, during this session|No, and tell Claude|✓ Submit'
+PAT_IDLE='Type something\.|Chat about this|What can I help|Ask me anything|›[[:space:]]*$|>[[:space:]]*$'
+CTX_PATTERN='ctx:[0-9]+%'
+RATE_PATTERN='5h:[0-9]+%|7d:[0-9]+%'
+SPINNER_PATTERN='^[[:space:]]*[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏⠂⠒⠲⠖⠐⠈⠁⠉⠚⠞⠳⠓]+[[:space:]]+'
+
+TAB=$'\t'
+snap() { tmux capture-pane -t "$1" -p -S "-$CAPTURE_LINES" 2>/dev/null; }
+classify() {
+  local text="$1"
+  if printf '%s' "$text" | grep -qiE "$PAT_WAITING"; then
+    echo "waiting"
+  elif printf '%s' "$text" | grep -qiE "$PAT_RUNNING"; then
+    echo "running"
+  elif printf '%s' "$text" | grep -qiE "$PAT_IDLE"; then
+    echo "idle"
+  else
+    echo "idle"
+  fi
+}
+icon() {
+  case "$1" in
+    running) printf '\033[33m● running\033[0m' ;;
+    waiting) printf '\033[31m◍ NEEDS YOU\033[0m' ;;
+    idle) printf '\033[32m✓ idle   \033[0m' ;;
+    *) printf '? ?      ' ;;
+  esac
+}
+ctx_of() {
+  local text="$1" ctx rate
+  ctx=$(printf '%s' "$text" | grep -oE "$CTX_PATTERN" | tail -1)
+  rate=$(printf '%s' "$text" | grep -oE "$RATE_PATTERN" | tr '\n' ' ' | sed 's/ $//')
+  if [ -n "$rate" ]; then echo "${rate} ${ctx}"; else echo "$ctx"; fi
+}
+sort_rank() {
+  case "$1" in
+    waiting) echo "0" ;;
+    running) echo "1" ;;
+    idle) echo "2" ;;
+    *) echo "9" ;;
+  esac
+}
+kind_of() {
+  local cmd="$1" text="$2"
+  if printf '%s' "$cmd" | grep -qiE '^codex|codex'; then
+    echo "codex"
+  elif printf '%s' "$cmd" | grep -qiE '^claude|claude' || printf '%s' "$text" | grep -qiE 'Claude Code|No, and tell Claude'; then
+    echo "claude"
+  else
+    echo "agent"
+  fi
+}
+clean_text() {
+  printf '%s' "$1" |
+    sed -E "s/\x1B\[[0-9;?]*[[:alpha:]]//g; s/\r//g; s/[[:space:]]+/ /g; s/^ //; s/ $//"
+}
+shorten() {
+  local text="$1" max="${2:-60}"
+  text=$(clean_text "$text")
+  if ((${#text} > max)); then
+    printf '%s...' "${text:0:max-3}"
+  else
+    printf '%s' "$text"
+  fi
+}
+title_of() {
+  local title="$1" path="$2"
+  title=$(clean_text "$title")
+  title=$(printf '%s' "$title" | sed -E "s/$SPINNER_PATTERN//")
+  [ -n "$title" ] || title=$(basename "$path")
+  shorten "$title" 32
+}
+request_of() {
+  local text="$1" req
+  req=$(printf '%s\n' "$text" |
+    sed -E "s/\x1B\[[0-9;?]*[[:alpha:]]//g" |
+    awk '
+      /^[[:space:]]*›[[:space:]]*.+/ {
+        line=$0
+        sub(/^[[:space:]]*›[[:space:]]*/, "", line)
+        if (line != "") found=line
+      }
+      /^(Human|User|You):[[:space:]]*.+/ {
+        line=$0
+        sub(/^(Human|User|You):[[:space:]]*/, "", line)
+        if (line != "") found=line
+      }
+      /^[[:space:]]*>[[:space:]]*.+/ {
+        line=$0
+        sub(/^[[:space:]]*>[[:space:]]*/, "", line)
+        if (line != "") found=line
+      }
+      END {print found}
+    ')
+  [ -n "$req" ] || req="-"
+  shorten "$req" 60
+}
+format_etime() {
+  local etime="$1" days=0 hours=0 mins=0 rest
+  etime="${etime//[[:space:]]/}"
+  [ -z "$etime" ] && {
+    echo "--"
+    return
+  }
+  if [[ "$etime" == *-* ]]; then
+    days="${etime%%-*}"
+    rest="${etime#*-}"
+  else
+    rest="$etime"
+  fi
+  days=$((10#$days))
+  IFS=: read -r a b c <<<"$rest"
+  if [ -n "${c:-}" ]; then
+    hours=$((10#$a))
+    mins=$((10#$b))
+  elif [ -n "${b:-}" ]; then
+    mins=$((10#$a))
+  fi
+  if ((days > 0)); then
+    echo "${days}d${hours}h"
+  elif ((hours > 0)); then
+    echo "${hours}h${mins}m"
+  else
+    echo "${mins}m"
+  fi
+}
+uptime_of() {
+  local start pid etime
+  start=$(tmux display-message -p -t "$1" '#{pane_start_time}' 2>/dev/null)
+  if [ -z "$start" ]; then
+    pid=$(tmux display-message -p -t "$1" '#{pane_pid}' 2>/dev/null)
+    etime=$(ps -p "$pid" -o etime= 2>/dev/null | tr -d ' ')
+    format_etime "$etime"
+    return
+  fi
+  local diff=$(($(date +%s) - start))
+  ((diff < 0)) && {
+    echo "--"
+    return
+  }
+  if ((diff < 3600)); then
+    echo "$((diff / 60))m"
+  elif ((diff < 86400)); then
+    echo "$((diff / 3600))h$(((diff % 3600) / 60))m"
+  else echo "$((diff / 86400))d"; fi
+}
+account_usage() {
+  local target
+  target=$(tmux list-panes -a -F '#{pane_current_command}'"$TAB"'#{session_name}:#{window_index}.#{pane_index}' 2>/dev/null |
+    awk -F'\t' -v c="$1" '$1 ~ c {print $2; exit}')
+  [ -z "$target" ] && {
+    echo ""
+    return
+  }
+  printf '%s' "$(snap "$target")" | grep -oE "$RATE_PATTERN" | tr '\n' ' ' | sed 's/ $//'
+}
+list_agents() {
+  local current
+  current=$(tmux display-message -p '#{session_name}:#{window_index}.#{pane_index}' 2>/dev/null || true)
+  tmux list-panes -a -F '#{session_name}:#{window_index}.#{pane_index}'"$TAB"'#{pane_current_command}'"$TAB"'#{pane_current_path}'"$TAB"'#{pane_title}' 2>/dev/null |
+    while IFS="$TAB" read -r target cmd path pane_title; do
+      printf '%s' "$cmd" | grep -qiE "$AI_COMMAND_PATTERN" || continue
+      local text
+      text=$(snap "$target")
+      if [ -n "$AI_CONTENT_HINT" ] && ! printf '%s' "$cmd" | grep -qiE 'codex'; then
+        printf '%s' "$text" | grep -qiE "$AI_CONTENT_HINT" || continue
+      fi
+      local st up ctx kind title request marker rank display
+      st=$(classify "$text")
+      up=$(uptime_of "$target")
+      ctx=$(ctx_of "$text")
+      [ -z "$ctx" ] && ctx="-"
+      kind=$(kind_of "$cmd" "$text")
+      title=$(title_of "$pane_title" "$path")
+      request=$(request_of "$text")
+      marker=" "
+      [ "$target" = "$current" ] && marker="*"
+      rank="$(sort_rank "$st")"
+      display=$(printf '%b %s %-7s %-22s [%-12s] ↑%-6s %-13s %s' \
+        "$(icon "$st")" "$marker" "$kind" "$target" "$title" "$up" "$ctx" "$request")
+      printf '%s%s%s%s%s\n' "${rank}:${kind}:${target}" "$TAB" "$display" "$TAB" "$target"
+    done | sort -t "$TAB" -k1,1
+}
+agent_counts() {
+  local rows total codex waiting running idle
+  rows=$(list_agents)
+  total=$(printf '%s\n' "$rows" | awk 'NF {count++} END {print count+0}')
+  codex=$(printf '%s\n' "$rows" | awk -F'\t' '$1 ~ /^[0-9]+:codex:/ {count++} END {print count+0}')
+  waiting=$(printf '%s\n' "$rows" | awk -F'\t' '$1 ~ /^0:codex:/ {count++} END {print count+0}')
+  running=$(printf '%s\n' "$rows" | awk -F'\t' '$1 ~ /^1:codex:/ {count++} END {print count+0}')
+  idle=$(printf '%s\n' "$rows" | awk -F'\t' '$1 ~ /^2:codex:/ {count++} END {print count+0}')
+  printf '%s\t%s\t%s\t%s\t%s' "$total" "$codex" "$waiting" "$running" "$idle"
+}
+usage_header() {
+  local c total codex waiting running idle
+  c=$(account_usage 'claude')
+  IFS="$TAB" read -r total codex waiting running idle <<<"$(agent_counts)"
+  printf '  ⏰ %s\n' "$(date '+%H:%M:%S')"
+  printf '  Claude: %s\n' "${c:-(컨텍스트만 / 5h·7d 미설정)}"
+  printf '  Codex : %s panes, %s waiting, %s running, %s idle\n' "$codex" "$waiting" "$running" "$idle"
+  printf '  Agents: total %s\n' "$total"
+  printf '  ────────────────────────────────────────────\n'
+}
+case "${1:-}" in
+  --list)
+    list_agents
+    exit 0
+    ;;
+  --usage)
+    usage_header
+    exit 0
+    ;;
+esac
+if ! command -v fzf >/dev/null 2>&1; then
+  usage_header
+  list_agents | cut -f2
+  echo
+  echo "(fzf 설치하면 골라서 점프: brew install fzf)"
+  exit 0
+fi
+header=$(usage_header)
+# shellcheck disable=SC2016
+selected=$(list_agents | fzf --with-nth=2 --delimiter="$TAB" --prompt='agent ❯ ' \
+  --header="$header" --reverse --ansi \
+  --preview 'tmux capture-pane -t $(echo {} | cut -f3) -p -S -30' \
+  --preview-window=right:58%:wrap --bind 'ctrl-r:reload(agents --list)')
+[ -z "$selected" ] && exit 0
+target=$(printf '%s' "$selected" | cut -f3)
+session="${target%%:*}"
+rest="${target#*:}" # 1.2
+win="${rest%%.*}"   # 1
+pane="${rest##*.}"  # 2
+
+if [ -n "${TMUX:-}" ]; then
+  tmux switch-client -t "$session"
+  tmux select-window -t "${session}:${win}"
+  tmux select-pane -t "${session}:${win}.${pane}" 2>/dev/null
+else
+  tmux attach -t "$session"
+fi

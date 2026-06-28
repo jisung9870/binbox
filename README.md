@@ -24,6 +24,7 @@ binbox/
 ├── tmux-layout             # fzf로 레이아웃 선택 후 세션 생성
 ├── tmux-kill-sessions      # fzf 다중 선택으로 세션 삭제
 ├── tmux-kill-pattern       # 패턴 매칭으로 세션 일괄 삭제
+├── agents                  # Claude/Codex tmux pane 상태 조회 및 점프
 ├── tmux-layouts/           # tmux 레이아웃 정의
 │   ├── golang-layout
 │   ├── k8s-layout
@@ -31,7 +32,10 @@ binbox/
 ├── kctx                    # fzf 기반 kubectl context 전환
 ├── kns                     # fzf 기반 kubectl namespace 전환
 ├── portcheck               # 포트 사용 프로세스 확인
-└── gitroot                 # git 저장소 루트로 cd
+├── gitroot                 # git 저장소 루트로 cd
+├── md2jira                 # md-to-jiratext CLI 실행
+├── tfplan                  # terraform plan을 tfplan 파일로 저장
+└── tfsum                   # terraform plan 요약 출력
 ```
 
 ## dx — Docker 기반 도구 실행기
@@ -77,6 +81,7 @@ DOCKER_OPTS=(
 | `tmux-layout` | 레이아웃을 선택하여 세션 생성 (golang, k8s, terraform) |
 | `tmux-kill-sessions` | fzf 다중 선택으로 세션 삭제 |
 | `tmux-kill-pattern` | 패턴 매칭으로 세션 일괄 삭제 |
+| `agents` | Claude/Codex tmux pane 상태 조회 및 fzf 점프 |
 
 ```bash
 # 프로젝트 선택 → 세션 생성
@@ -87,6 +92,15 @@ tmux-layout my-project ~/home/projects/my-project
 
 # k8s 패턴 세션 일괄 삭제
 tmux-kill-pattern k8s
+
+# Claude/Codex pane 목록
+agents --list
+
+# 계정/상태 요약
+agents --usage
+
+# fzf로 agent pane 선택 후 이동
+agents
 ```
 
 ### tmux-sessionizer 설정
@@ -134,6 +148,14 @@ portcheck 8080
 cd $(gitroot)
 # 또는 eval로 직접 이동
 eval "$(gitroot --cd)"
+
+# md-to-jiratext 실행
+md2jira input.md
+
+# terraform plan 저장 후 요약
+tfplan
+tfsum tree
+tfsum md plan-summary.md
 ```
 
 ## 요구 사항
@@ -142,6 +164,7 @@ eval "$(gitroot --cd)"
 - tmux
 - fzf (`brew install fzf`)
 - kubectl (kctx, kns 사용 시)
+- terraform, tf-summarize (tfplan, tfsum 사용 시)
 
 ## 설치
 
