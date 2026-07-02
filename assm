@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+# assm — fzf로 EC2 인스턴스 선택 후 SSM 세션 접속
+set -euo pipefail
+
+_self=$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || echo "${BASH_SOURCE[0]}")
+BINBOX_DIR=$(cd "$(dirname "$_self")" && pwd)
+# shellcheck source=lib/common.sh
+source "$BINBOX_DIR/lib/common.sh" || { echo "lib/common.sh not found" >&2; exit 1; }
+
+usage() {
+  cat <<'EOF'
+assm — fzf로 EC2 인스턴스 선택 후 SSM 세션 접속
+
+사용법:
+  assm                  # 실행 중인 인스턴스에서 선택
+  assm <instance-id>    # 직접 접속
+
+profile/region은 AWS_PROFILE / AWS_REGION 환경변수를 따른다. (awsp와 연동)
+
+요구 사항:
+  aws cli, session-manager-plugin
+  (brew install awscli session-manager-plugin)
+EOF
+}
+
+case "${1:-}" in
+  -h|--help|help) usage; exit 0 ;;
+esac
+
+need_cmd aws "brew install awscli"
+need_cmd session-manager-plugin "brew install session-manager-plugin"
+
+# 인자가 있으면 직접 접속
+if [[ -n "${1:-}" ]]; then
+  exec aws ssm start-session --target "$1"
+fi
+
+need_cmd fzf "brew install fzf"
+
+# shellcheck disable=SC2016  # 백틱은 JMESPath 리터럴 문법
+instances=$(aws ec2 describe-instances \
+  --filters Name=instance-state-name,Values=running \
+  --query 'Reservations[].Instances[].[InstanceId, Tags[?Key==`Name`]|[0].Value, PrivateIpAddress, InstanceType]' \
+  --output text 2>/dev/null || true)
+
+[[ -n "$instances" ]] || die "실행 중인 인스턴스가 없거나 조회에 실패했습니다. (AWS_PROFILE: ${AWS_PROFILE:-없음})"
+
+selected=$(printf '%s\n' "$instances" | column -t | fzf_pick \
+  --prompt="인스턴스 선택 (profile: ${AWS_PROFILE:-default}): " \
+  --header="InstanceId  Name  PrivateIp  Type")
+
+[[ -n "$selected" ]] || exit 0
+
+instance_id=$(printf '%s' "$selected" | awk '{print $1}')
+echo "→ SSM 세션 시작: $instance_id"
+exec aws ssm start-session --target "$instance_id"

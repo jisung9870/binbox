@@ -1,0 +1,80 @@
+#!/usr/bin/env bats
+# 신규 유틸리티(gbr/glog/klog/kexec/kpf/awsp/assm) 인자 검증 테스트
+# NOTE: bats가 멀티바이트 테스트명을 처리하지 못해 테스트명은 영문 사용
+
+load helpers/stub
+
+setup() {
+  BINBOX_DIR="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
+  setup_stub_dir
+}
+
+teardown() {
+  teardown_stub_dir
+}
+
+@test "new tools -h: all exit 0" {
+  for tool in gbr glog klog kexec kpf awsp assm; do
+    run "$BINBOX_DIR/$tool" -h
+    [ "$status" -eq 0 ]
+  done
+}
+
+@test "gbr: errors outside a git repo" {
+  dir=$(mktemp -d)
+  run bash -c "cd '$dir' && GIT_CEILING_DIRECTORIES='$dir' '$BINBOX_DIR/gbr' 2>&1"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"git 저장소"* ]]
+  rm -rf "$dir"
+}
+
+@test "gbr <branch>: switches directly without fzf" {
+  repo=$(mktemp -d)
+  git -C "$repo" init -q -b main
+  git -C "$repo" -c user.email=t@t -c user.name=t commit --allow-empty -qm init
+  git -C "$repo" branch feature
+  run bash -c "cd '$repo' && '$BINBOX_DIR/gbr' feature && git branch --show-current"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"feature"* ]]
+  rm -rf "$repo"
+}
+
+@test "klog: unknown option errors" {
+  run "$BINBOX_DIR/klog" --bogus
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"알 수 없는 옵션"* ]]
+}
+
+@test "klog: --tail requires a number" {
+  run "$BINBOX_DIR/klog" --tail abc
+  [ "$status" -eq 1 ]
+}
+
+@test "kpf: -n requires a value" {
+  run "$BINBOX_DIR/kpf" -n
+  [ "$status" -eq 1 ]
+}
+
+@test "awsp <profile>: nonexistent profile errors" {
+  export HOME="$STUB_DIR"
+  mkdir -p "$STUB_DIR/.aws"
+  printf '[profile dev]\nregion=ap-northeast-2\n' > "$STUB_DIR/.aws/config"
+  run env PATH="/usr/bin:/bin" "$BINBOX_DIR/awsp" no-such-profile
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"존재하지 않는 profile"* ]]
+}
+
+@test "awsp <profile>: valid profile prints export line" {
+  export HOME="$STUB_DIR"
+  mkdir -p "$STUB_DIR/.aws"
+  printf '[profile dev]\nregion=ap-northeast-2\n' > "$STUB_DIR/.aws/config"
+  run env PATH="/usr/bin:/bin" "$BINBOX_DIR/awsp" dev
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"export AWS_PROFILE=dev"* ]]
+}
+
+@test "assm: missing aws cli errors with hint" {
+  run env PATH="/usr/bin:/bin" "$BINBOX_DIR/assm" 2>&1
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"aws"* ]]
+}

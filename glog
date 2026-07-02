@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+# glog — fzf 기반 git log 탐색
+set -euo pipefail
+
+_self=$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || echo "${BASH_SOURCE[0]}")
+BINBOX_DIR=$(cd "$(dirname "$_self")" && pwd)
+# shellcheck source=lib/common.sh
+source "$BINBOX_DIR/lib/common.sh" || { echo "lib/common.sh not found" >&2; exit 1; }
+
+usage() {
+  cat <<'EOF'
+glog — fzf 기반 git log 탐색 (Enter로 선택한 커밋 해시 출력)
+
+사용법:
+  glog [git log 인자...]
+
+예시:
+  glog                          # 전체 로그 탐색
+  glog -20                      # 최근 20개만
+  glog -- path/to/file          # 특정 파일 이력
+  git rebase -i $(glog)^        # 선택 커밋부터 rebase
+  git show $(glog)              # 선택 커밋 상세
+EOF
+}
+
+case "${1:-}" in
+  -h|--help|help) usage; exit 0 ;;
+esac
+
+need_cmd git
+need_cmd fzf "brew install fzf"
+
+git rev-parse --git-dir >/dev/null 2>&1 || die "git 저장소 안에 있지 않습니다."
+
+selected=$(git log --oneline --decorate --color=always "$@" | fzf_pick \
+  --ansi --no-sort \
+  --prompt="커밋 선택: " \
+  --preview="git show --color=always --stat -p {1}" \
+  --preview-window=right:60%:wrap)
+
+if [[ -n "$selected" ]]; then
+  git rev-parse "$(printf '%s' "$selected" | awk '{print $1}')"
+fi

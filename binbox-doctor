@@ -29,14 +29,18 @@ echo "Core tools"
 check_cmd docker "core: dx container runner" "brew install --cask docker"
 check_cmd tmux "core: tmux helpers" "brew install tmux"
 check_cmd fzf "core: interactive selectors" "brew install fzf"
+check_cmd git "core: gbr/glog/gitroot" "brew install git"
 check_cmd lsof "core: portcheck" "usually preinstalled on macOS"
 
 echo
 echo "Optional tools"
-check_cmd kubectl "optional: kctx/kns" "brew install kubectl"
+check_cmd kubectl "optional: kctx/kns/klog/kexec/kpf" "brew install kubectl"
 check_cmd terraform "optional: tfplan/tfsum" "brew install terraform"
 check_cmd tf-summarize "optional: tfsum" "install tf-summarize"
+check_cmd aws "optional: awsp/assm" "brew install awscli"
+check_cmd session-manager-plugin "optional: assm" "brew install session-manager-plugin"
 check_cmd shellcheck "optional: binbox-check" "brew install shellcheck"
+check_cmd bats "optional: make test" "brew install bats-core"
 
 echo
 if ((core_missing)); then

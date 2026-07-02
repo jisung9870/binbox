@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+# awsp — fzf 기반 AWS_PROFILE 전환
+# 자식 프로세스는 부모 셸의 환경변수를 바꿀 수 없으므로 export 문을 stdout으로 출력한다.
+# eval "$(awsp)" 로 사용하거나 .zshrc에 alias awsp='eval "$(command awsp)"' 등록.
+set -euo pipefail
+
+_self=$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || echo "${BASH_SOURCE[0]}")
+BINBOX_DIR=$(cd "$(dirname "$_self")" && pwd)
+# shellcheck source=lib/common.sh
+source "$BINBOX_DIR/lib/common.sh" || { echo "lib/common.sh not found" >&2; exit 1; }
+
+usage() {
+  cat <<'EOF'
+awsp — fzf 기반 AWS_PROFILE 전환
+
+사용법:
+  eval "$(awsp)"            # fzf로 profile 선택
+  eval "$(awsp <profile>)"  # 직접 지정
+
+설정 (.zshrc):
+  alias awsp='eval "$(command awsp)"'
+EOF
+}
+
+case "${1:-}" in
+  -h|--help|help) usage >&2; exit 0 ;;
+esac
+
+profiles=""
+if command -v aws >/dev/null 2>&1; then
+  profiles=$(aws configure list-profiles 2>/dev/null || true)
+fi
+if [[ -z "$profiles" && -f "$HOME/.aws/config" ]]; then
+  profiles=$(grep -oE '^\[profile [^]]+\]' "$HOME/.aws/config" | sed 's/^\[profile //; s/\]$//' || true)
+  if grep -qE '^\[default\]' "$HOME/.aws/config"; then
+    profiles=$(printf 'default\n%s\n' "$profiles")
+  fi
+fi
+
+[[ -n "$profiles" ]] || die "AWS profile을 찾을 수 없습니다. (~/.aws/config 확인)"
+
+selected="${1:-}"
+if [[ -n "$selected" ]]; then
+  printf '%s\n' "$profiles" | grep -Fxq "$selected" || die "존재하지 않는 profile: $selected"
+else
+  need_cmd fzf "brew install fzf"
+  current="${AWS_PROFILE:-}"
+  selected=$(printf '%s\n' "$profiles" | fzf_pick \
+    --prompt="profile 선택 (현재: ${current:-없음}): " \
+    --header="현재: ${current:-없음}")
+  [[ -n "$selected" ]] || exit 0
+fi
+
+# eval 없이 실행하면 아무 효과가 없으므로 stdout이 TTY면 안내
+if [[ -t 1 ]]; then
+  echo "환경변수를 실제로 바꾸려면 eval로 실행하세요:" >&2
+  echo "  eval \"\$(awsp)\"  또는 alias awsp='eval \"\$(command awsp)\"'" >&2
+fi
+
+printf 'export AWS_PROFILE=%q\n' "$selected"
+echo "AWS_PROFILE=${selected}" >&2

@@ -11,7 +11,11 @@ export PATH="$HOME/binbox:$PATH"
 
 ```
 binbox/
-├── binbox-check            # 개발용 shellcheck 일괄 실행
+├── Makefile                # make check / test / doctor / install
+├── lib/
+│   └── common.sh           # 공통 함수 (die, need_cmd, fzf_pick, ...)
+├── tests/                  # bats 테스트
+├── binbox-check            # 개발용 shellcheck 일괄 실행 (자동 탐색)
 ├── binbox-doctor           # 로컬 의존성 점검
 ├── dx                      # Docker 기반 도구 실행기
 ├── dx.d/                   # dx 도구 설정 디렉토리
@@ -28,16 +32,40 @@ binbox/
 ├── tmux-kill-pattern       # 패턴 매칭으로 세션 일괄 삭제
 ├── agents                  # Claude/Codex tmux pane 상태 조회 및 점프
 ├── tmux-layouts/           # tmux 레이아웃 정의
-│   ├── golang-layout
-│   ├── k8s-layout
-│   └── terraform-layout
+├── gbr                     # fzf 기반 git 브랜치 전환
+├── glog                    # fzf 기반 git log 탐색
+├── gitroot                 # git 저장소 루트로 cd
 ├── kctx                    # fzf 기반 kubectl context 전환
 ├── kns                     # fzf 기반 kubectl namespace 전환
+├── klog                    # fzf로 pod 선택 후 logs -f
+├── kexec                   # fzf로 pod 선택 후 셸 접속
+├── kpf                     # fzf로 pod 선택 후 port-forward
+├── awsp                    # fzf 기반 AWS_PROFILE 전환
+├── assm                    # fzf로 EC2 선택 후 SSM 세션 접속
 ├── portcheck               # 포트 사용 프로세스 확인
-├── gitroot                 # git 저장소 루트로 cd
 ├── md2jira                 # md-to-jiratext CLI 실행
 ├── tfplan                  # terraform plan을 tfplan 파일로 저장
 └── tfsum                   # terraform plan 요약 출력
+```
+
+## 개발/관리
+
+```bash
+make check     # shellcheck 일괄 실행 (스크립트 자동 탐색)
+make test      # bats 테스트 (brew install bats-core)
+make doctor    # 의존성 점검
+make install   # 실행 권한 재적용 + PATH 안내
+```
+
+- `binbox-check`는 bash shebang을 가진 스크립트를 자동 탐색하므로 새 스크립트를 목록에 추가할 필요가 없다.
+- GitHub Actions(`.github/workflows/ci.yml`)가 push/PR마다 shellcheck + bats를 실행한다.
+- 공통 함수는 `lib/common.sh`에 있다. 새 스크립트는 아래 프롤로그로 source:
+
+```bash
+_self=$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || echo "${BASH_SOURCE[0]}")
+BINBOX_DIR=$(cd "$(dirname "$_self")" && pwd)
+# shellcheck source=lib/common.sh
+source "$BINBOX_DIR/lib/common.sh" || { echo "lib/common.sh not found" >&2; exit 1; }
 ```
 
 ## dx — Docker 기반 도구 실행기
@@ -139,18 +167,61 @@ EOF
 
 `tmux-layouts/` 디렉토리에 `*-layout` 파일을 추가한다. `tmux-layout` 명령어가 자동으로 인식한다.
 
+## git 유틸리티
+
+```bash
+# 브랜치 전환 (최근 커밋 순, preview로 로그 확인)
+gbr
+gbr -a               # 원격 브랜치 포함
+gbr feature/login    # 직접 전환
+
+# 커밋 탐색 (Enter로 해시 출력 → 다른 명령과 조합)
+glog
+git rebase -i $(glog)^
+git show $(glog)
+
+# git 저장소 루트로 이동
+cd $(gitroot)
+eval "$(gitroot --cd)"
+```
+
 ## Kubernetes 유틸리티
 
 ```bash
-# context 전환 (fzf)
+# context / namespace 전환 (fzf)
 kctx
-
-# namespace 전환 (fzf)
 kns
 
 # 특정 context/namespace 직접 지정
 kctx my-cluster
 kns monitoring
+
+# pod 로그 팔로우 (다중 컨테이너면 2차 선택)
+klog
+klog -n monitoring --tail 500
+
+# pod 셸 접속 (bash 없으면 sh)
+kexec
+kexec -n monitoring my-pod
+
+# port-forward (containerPort 자동 감지)
+kpf
+kpf my-pod 9000:8080
+```
+
+## AWS 유틸리티
+
+```bash
+# AWS_PROFILE 전환 — 자식 프로세스는 부모 셸 환경을 못 바꾸므로 eval 사용
+eval "$(awsp)"
+eval "$(awsp dev)"
+
+# .zshrc에 alias 등록 추천
+alias awsp='eval "$(command awsp)"'
+
+# EC2 인스턴스 선택 후 SSM 세션 접속 (awsp로 profile 설정 후 사용)
+assm
+assm i-0123456789abcdef0
 ```
 
 ## 기타 유틸리티
@@ -165,12 +236,7 @@ binbox-check
 # 포트 사용 프로세스 확인
 portcheck 8080
 
-# git 저장소 루트로 이동
-cd $(gitroot)
-# 또는 eval로 직접 이동
-eval "$(gitroot --cd)"
-
-# md-to-jiratext 실행
+# md-to-jiratext 실행 (위치가 다르면 MD2JIRA_HOME으로 지정)
 md2jira input.md
 
 # terraform plan 저장 후 요약
@@ -188,12 +254,15 @@ Core:
 - Docker
 - tmux
 - fzf (`brew install fzf`)
+- git
 - lsof (portcheck 사용 시, macOS 기본 포함)
 
 Optional:
-- kubectl (kctx, kns 사용 시)
+- kubectl (kctx, kns, klog, kexec, kpf 사용 시)
 - terraform, tf-summarize (tfplan, tfsum 사용 시)
+- aws cli, session-manager-plugin (awsp, assm 사용 시)
 - shellcheck (개발/검증 시 선택)
+- bats-core (`make test` 사용 시)
 - ss/iproute2 (Linux portcheck 사용 시, 없으면 lsof로 대체)
 
 ## 설치
@@ -206,6 +275,5 @@ echo 'export PATH="$HOME/binbox:$PATH"' >> ~/.zshrc
 source ~/.zshrc
 
 # 실행 권한 부여
-find ~/binbox -maxdepth 1 -type f -exec chmod +x {} \;
-find ~/binbox/tmux-layouts -maxdepth 1 -type f -exec chmod +x {} \;
+cd ~/binbox && make install
 ```
