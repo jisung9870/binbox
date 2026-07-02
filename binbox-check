@@ -9,42 +9,30 @@ command -v shellcheck >/dev/null || {
   exit 1
 }
 
-files=(
-  agents
-  binbox-check
-  binbox-doctor
-  dx
-  gitroot
-  kctx
-  kns
-  md2jira
-  portcheck
-  tfplan
-  tfsum
-  tmux-attach
-  tmux-kill-pattern
-  tmux-kill-sessions
-  tmux-layout
-  tmux-sessionizer
-)
-
-layout_files=()
-while IFS= read -r file; do
-  layout_files+=("$file")
-done < <(find "$SCRIPT_DIR/tmux-layouts" -maxdepth 1 -type f -print 2>/dev/null | sort)
-
+# bash shebang을 가진 최상위 스크립트 + tmux-layouts + lib 자동 탐색
 targets=()
-for file in "${files[@]}"; do
-  if [[ -f "$SCRIPT_DIR/$file" ]]; then
-    targets+=("$SCRIPT_DIR/$file")
-  fi
-done
-targets+=("${layout_files[@]}")
+while IFS= read -r file; do
+  head -1 "$file" 2>/dev/null | grep -q '^#!/usr/bin/env bash' || continue
+  targets+=("$file")
+done < <(find "$SCRIPT_DIR" "$SCRIPT_DIR/tmux-layouts" "$SCRIPT_DIR/lib" \
+  -maxdepth 1 -type f -print 2>/dev/null | sort -u)
 
 if [[ ${#targets[@]} -eq 0 ]]; then
   echo "No shell scripts found to check." >&2
   exit 1
 fi
 
-shellcheck "${targets[@]}"
-echo "shellcheck passed (${#targets[@]} files)"
+# -x: source된 lib/common.sh를 따라 들어가 검사
+shellcheck -x "${targets[@]}"
+
+# dx.d 설정 조각 (shebang 없음, dx가 source) — bash 문법으로 별도 검사
+dxd_files=()
+while IFS= read -r file; do
+  dxd_files+=("$file")
+done < <(find "$SCRIPT_DIR/dx.d" -maxdepth 1 -type f -print 2>/dev/null | sort)
+
+if [[ ${#dxd_files[@]} -gt 0 ]]; then
+  shellcheck -s bash "${dxd_files[@]}"
+fi
+
+echo "shellcheck passed ($((${#targets[@]} + ${#dxd_files[@]})) files)"

@@ -1,4 +1,7 @@
+# dx가 source하는 설정. 이미지 태그는 minor 버전 고정, 필요시 갱신.
+# shellcheck disable=SC2034
 DOCKER_IMAGE="ghcr.io/jisung9870/binbox-ansible:v10.4.0-2.17"
+# shellcheck disable=SC2034
 DOCKER_OPTS=(
   -v "$HOME/.ssh:/root/.ssh"
 )

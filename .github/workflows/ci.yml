@@ -1,0 +1,26 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: shellcheck
+        run: ./binbox-check
+
+      - name: install bats
+        run: sudo apt-get update && sudo apt-get install -y bats
+
+      - name: bats tests
+        run: |
+          if [ -d tests ]; then
+            bats tests/
+          else
+            echo "no tests directory yet, skipping"
+          fi
