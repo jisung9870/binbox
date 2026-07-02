@@ -1,0 +1,26 @@
+#compdef bb
+# bb zsh 자동완성 — 도구 목록은 bb list에서 동적으로 가져온다.
+
+_bb() {
+  local -a subcmds tools
+  subcmds=(
+    'list:도구 목록'
+    'help:전체/도구별 도움말'
+    'doctor:의존성 점검'
+    'check:shellcheck 일괄 실행'
+    'upgrade:binbox 업데이트'
+  )
+
+  if (( CURRENT == 2 )); then
+    tools=(${(f)"$(bb list 2>/dev/null)"})
+    _describe -t subcmds 'subcommand' subcmds
+    _describe -t tools 'tool' tools
+  elif (( CURRENT == 3 )) && [[ "${words[2]}" == help ]]; then
+    tools=(${(f)"$(bb list 2>/dev/null)"})
+    _describe -t tools 'tool' tools
+  else
+    _files
+  fi
+}
+
+_bb "$@"

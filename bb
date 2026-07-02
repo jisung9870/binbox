@@ -1,0 +1,109 @@
+#!/usr/bin/env bash
+# bb — binbox 통합 진입점 (busybox 스타일 디스패처)
+# 기존 개별 명령어는 그대로 유지되며 bb는 추가 진입점이다.
+set -euo pipefail
+
+_self=$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || echo "${BASH_SOURCE[0]}")
+BINBOX_DIR=$(cd "$(dirname "$_self")" && pwd)
+# shellcheck source=lib/common.sh
+source "$BINBOX_DIR/lib/common.sh" || { echo "lib/common.sh not found" >&2; exit 1; }
+
+usage() {
+  cat <<'EOF'
+bb — binbox 통합 진입점
+
+사용법:
+  bb <tool> [args...]   도구 실행 (예: bb kctx, bb klog -n mon)
+  bb list               도구 목록
+  bb help [tool]        전체/도구별 도움말
+  bb doctor             의존성 점검 (= binbox-doctor)
+  bb check              shellcheck 일괄 실행 (= binbox-check)
+  bb upgrade            binbox 업데이트 (git pull)
+
+zsh 자동완성: .zshrc에 fpath=(~/binbox/completions $fpath) 추가 (compinit 전)
+EOF
+}
+
+list_tools() {
+  local file name
+  while IFS= read -r file; do
+    head -1 "$file" 2>/dev/null | grep -q '^#!/usr/bin/env bash' || continue
+    [[ -x "$file" ]] || continue
+    name=$(basename "$file")
+    [[ "$name" == "bb" ]] && continue
+    printf '%s\n' "$name"
+  done < <(find "$BINBOX_DIR" -maxdepth 1 -type f -print 2>/dev/null | sort)
+}
+
+resolve_tool() {
+  # 예약어 별칭 + 경로 조작 차단
+  local tool="$1"
+  case "$tool" in
+    doctor) tool="binbox-doctor" ;;
+    check) tool="binbox-check" ;;
+  esac
+  [[ "$tool" == */* ]] && die "올바르지 않은 도구 이름: $tool"
+  if [[ ! -x "$BINBOX_DIR/$tool" ]] ||
+    ! head -1 "$BINBOX_DIR/$tool" 2>/dev/null | grep -q '^#!/usr/bin/env bash'; then
+    {
+      echo "알 수 없는 도구: $tool"
+      echo
+      echo "사용 가능한 도구:"
+      list_tools
+    } >&2
+    exit 1
+  fi
+  printf '%s' "$tool"
+}
+
+do_upgrade() {
+  need_cmd git
+  local before after
+  before=$(git -C "$BINBOX_DIR" rev-parse HEAD 2>/dev/null) ||
+    die "git 저장소가 아닙니다: $BINBOX_DIR"
+  git -C "$BINBOX_DIR" pull --ff-only ||
+    die "업데이트 실패. 로컬 변경이 있으면 커밋/스태시 후 다시 시도하세요."
+  after=$(git -C "$BINBOX_DIR" rev-parse HEAD)
+  if [[ "$before" == "$after" ]]; then
+    echo "이미 최신입니다."
+  else
+    echo
+    echo "업데이트된 변경 사항:"
+    git -C "$BINBOX_DIR" log --oneline "${before}..${after}"
+  fi
+}
+
+case "${1:-}" in
+  ""|-h|--help)
+    usage
+    echo
+    echo "사용 가능한 도구:"
+    list_tools
+    exit 0
+    ;;
+  list)
+    list_tools
+    exit 0
+    ;;
+  help)
+    if [[ -z "${2:-}" ]]; then
+      usage
+      echo
+      echo "사용 가능한 도구:"
+      list_tools
+      exit 0
+    fi
+    tool=$(resolve_tool "$2")
+    exec "$BINBOX_DIR/$tool" -h
+    ;;
+  upgrade)
+    do_upgrade
+    exit 0
+    ;;
+  *)
+    tool=$(resolve_tool "$1")
+    shift
+    # exec: TTY/fzf 인터랙티브, 종료코드, eval "$(bb awsp)" 모두 보존
+    exec "$BINBOX_DIR/$tool" "$@"
+    ;;
+esac
