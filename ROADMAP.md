@@ -24,6 +24,13 @@ binbox의 개선 방향과 계획. 완료된 항목은 기록으로 남긴다.
 
 ### 중기
 
+- [ ] **bb 일원화 — 개별 명령어 PATH 제거 검토** (아래 "외부 결합 지점" 선행 조치 필수)
+  - 스크립트를 `libexec/` 하위로 이동해 PATH에서 숨기고 `bb`만 노출
+  - 선행 조치: 외부 설정에서 개별 명령어를 직접 호출하는 곳을 먼저 수정
+    - `~/.config/nvim/lua/plugins/terminal.lua:58` — toggleterm `<leader>tp`의 `cmd = "tmux-sessionizer"` → `bb tmux-sessionizer`
+    - `~/.tmux.conf:159` — `bind f run-shell "tmux neww tmux-sessionizer"` → `bb tmux-sessionizer`
+  - `bb list`/`resolve_tool`/`binbox-check`/`make install`의 탐색 경로를 `libexec/`로 변경
+  - 자주 쓰는 명령은 `.zshrc` alias로 복원 가능 (예: `alias kctx='bb kctx'`)
 - [ ] `bb new <name>` — 프롤로그/usage 템플릿이 채워진 새 스크립트 생성
 - [ ] 개별 명령어 zsh 완성 확장 (kctx: context 목록, kns: namespace 목록 등)
 - [ ] `awsp`에 region 전환 옵션 검토 (`AWS_REGION` export 동시 출력)
@@ -35,6 +42,31 @@ binbox의 개선 방향과 계획. 완료된 항목은 기록으로 남긴다.
       polling 갱신, 상태별 색상, 실시간 pane preview가 필요해지면 bubbletea로 개별 이전.
       전면 Go 이전이 아니라 이 도구 하나만 대상.
 - [ ] `klog` multi-pod 동시 로그 (stern 스타일) — 필요성 생기면 stern 설치를 먼저 검토
+
+## 외부 결합 지점
+
+binbox 바깥의 설정이 binbox에 의존하는 곳. **명령어 이름을 바꾸거나 PATH에서 제거하기 전에
+반드시 여기를 먼저 확인한다.** (2026-07 조사 기준)
+
+### 개별 명령어 이름으로 직접 호출 (일원화 시 깨짐)
+
+| 위치 | 내용 |
+|------|------|
+| `~/.config/nvim/lua/plugins/terminal.lua:58` | toggleterm `<leader>tp`가 `tmux-sessionizer` 실행 |
+| `~/.tmux.conf:159` | `bind f run-shell "tmux neww tmux-sessionizer"` |
+
+### 설정 파일 포맷 공유 (bb와 무관, 포맷 변경 시 주의)
+
+- `~/.config/tmux-sessionizer/dirs` — nvim의 `editor.lua:7`(Telescope 프로젝트 목록)이
+  이 파일을 **직접 파싱**한다 (`#` 주석, `~` 확장 규칙 포함).
+  binbox 쪽에서 파일 위치/포맷을 바꾸면 nvim 쪽은 조용히 폴백으로 빠지므로
+  lazyvim-config 저장소와 함께 수정해야 한다.
+
+### binbox → 외부 방향
+
+- `tmux-layouts/{golang,terraform}-layout`이 pane에서 `nvim`을 실행 — 읽기 전용 사용이라 영향 없음.
+- `bb upgrade`는 `git -C $BINBOX_DIR`로 binbox 저장소만 pull — 다른 저장소(~/.config/nvim 등)는 건드리지 않음.
+- `bb` 이름 충돌 없음 확인 (babashka/alias/zsh 함수 없음, LazyVim `<leader>bb` 키맵은 nvim 내부라 무관).
 
 ## 완료
 
