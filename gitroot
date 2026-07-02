@@ -1,8 +1,20 @@
 #!/usr/bin/env bash
 # gitroot — git 저장소 루트 경로 출력
-# 사용: cd $(gitroot)
-#       eval "$(gitroot --cd)"
 set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+gitroot — git 저장소 루트 경로 출력
+
+사용법:
+  cd $(gitroot)           # 루트 경로 출력
+  eval "$(gitroot --cd)"  # cd 명령 출력 (eval로 직접 이동)
+EOF
+}
+
+case "${1:-}" in
+  -h|--help|help) usage; exit 0 ;;
+esac
 
 root=$(git rev-parse --show-toplevel 2>/dev/null || true)
 
@@ -12,7 +24,7 @@ if [[ -z "$root" ]]; then
 fi
 
 if [[ "${1:-}" == "--cd" ]]; then
-  echo "cd '$root'"
+  printf 'cd %q\n' "$root"
 else
   echo "$root"
 fi

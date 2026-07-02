@@ -1,5 +1,23 @@
 #!/usr/bin/env bash
+# tmux-sessionizer — 프로젝트 디렉토리를 fzf로 선택하여 tmux 세션 생성/전환
 set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+tmux-sessionizer — 프로젝트 디렉토리를 fzf로 선택하여 tmux 세션 생성/전환
+
+사용법:
+  tmux-sessionizer
+
+설정:
+  프로젝트 디렉토리 목록: ~/.config/tmux-sessionizer/dirs (한 줄에 하나, ~ 사용 가능)
+  최근 선택 기록: ~/.local/state/tmux-sessionizer/recent
+EOF
+}
+
+case "${1:-}" in
+  -h|--help|help) usage; exit 0 ;;
+esac
 
 CONFIG_FILE="${XDG_CONFIG_HOME:-$HOME/.config}/tmux-sessionizer/dirs"
 STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/tmux-sessionizer"
@@ -18,7 +36,7 @@ fi
 
 command -v tmux >/dev/null || { echo "tmux가 설치되지 않았습니다." >&2; exit 1; }
 if ! command -v fzf &>/dev/null; then
-  echo "fzf가 설치되지 않았습니다. 'brew install fzf'로 설치하세요."
+  echo "fzf가 설치되지 않았습니다. 'brew install fzf'로 설치하세요." >&2
   exit 1
 fi
 

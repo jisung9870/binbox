@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# set -e 미사용: grep 패턴 매칭 실패(정상 상황)가 스크립트를 죽이지 않도록 의도적으로 생략
 set -uo pipefail
 
 AI_COMMAND_PATTERN='claude|codex|node'
@@ -208,7 +209,27 @@ usage_header() {
   printf '  Agents: total %s\n' "$total"
   printf '  ────────────────────────────────────────────\n'
 }
+usage() {
+  cat <<'EOF'
+agents — Claude/Codex tmux pane 상태 조회 및 점프
+
+사용법:
+  agents            # fzf로 pane 선택 후 이동 (ctrl-r: 새로고침)
+  agents --list     # pane 목록만 출력
+  agents --usage    # 계정/상태 요약만 출력
+
+상태:
+  ◍ NEEDS YOU   입력 대기 중
+  ● running     작업 중
+  ✓ idle        대기
+EOF
+}
+
 case "${1:-}" in
+  -h|--help|help)
+    usage
+    exit 0
+    ;;
   --list)
     list_agents
     exit 0
@@ -226,11 +247,13 @@ if ! command -v fzf >/dev/null 2>&1; then
   exit 0
 fi
 header=$(usage_header)
+# reload 바인딩이 PATH에 의존하지 않도록 자기 자신의 절대경로 사용 (./agents 실행도 동작)
+self_q=$(printf '%q' "$(cd "$(dirname "$0")" && pwd)/$(basename "$0")")
 # shellcheck disable=SC2016
 selected=$(list_agents | fzf --with-nth=2 --delimiter="$TAB" --prompt='agent ❯ ' \
   --header="$header" --reverse --ansi \
   --preview 'tmux capture-pane -t $(echo {} | cut -f3) -p -S -30' \
-  --preview-window=right:58%:wrap --bind 'ctrl-r:reload(agents --list)')
+  --preview-window=right:58%:wrap --bind "ctrl-r:reload($self_q --list)")
 [ -z "$selected" ] && exit 0
 target=$(printf '%s' "$selected" | cut -f3)
 session="${target%%:*}"

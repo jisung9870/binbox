@@ -105,4 +105,5 @@ done
 
 [[ -n "$EXTRA_OUT" ]] && FLAGS+=("$EXTRA_OUT")
 
-terraform show -json "$PLAN_FILE" | tf-summarize "${FLAGS[@]}"
+# ${FLAGS[@]+...}: bash 3.2(macOS 기본)의 set -u는 빈 배열 확장을 unbound로 취급
+terraform show -json "$PLAN_FILE" | tf-summarize ${FLAGS[@]+"${FLAGS[@]}"}
