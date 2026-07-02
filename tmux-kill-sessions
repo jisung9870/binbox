@@ -1,8 +1,27 @@
 #!/usr/bin/env bash
+# tmux-kill-sessions — fzf 다중 선택으로 tmux 세션 삭제
 set -euo pipefail
 
-command -v tmux >/dev/null || { echo "tmux가 설치되지 않았습니다." >&2; exit 1; }
-command -v fzf >/dev/null || { echo "fzf가 설치되지 않았습니다. 'brew install fzf'로 설치하세요." >&2; exit 1; }
+_self=$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || echo "${BASH_SOURCE[0]}")
+BINBOX_DIR=$(cd "$(dirname "$_self")" && pwd)
+# shellcheck source=lib/common.sh
+source "$BINBOX_DIR/lib/common.sh" || { echo "lib/common.sh not found" >&2; exit 1; }
+
+usage() {
+  cat <<'EOF'
+tmux-kill-sessions — fzf 다중 선택으로 tmux 세션 삭제
+
+사용법:
+  tmux-kill-sessions    # Tab으로 다중 선택 후 Enter
+EOF
+}
+
+case "${1:-}" in
+  -h|--help|help) usage; exit 0 ;;
+esac
+
+need_cmd tmux "brew install tmux"
+need_cmd fzf "brew install fzf"
 
 sessions=$(tmux list-sessions -F "#{session_name}" 2>/dev/null || true)
 
@@ -11,7 +30,7 @@ if [[ -z "$sessions" ]]; then
     exit 0
 fi
 
-to_kill=$(printf '%s\n' "$sessions" | fzf --multi --prompt="삭제할 세션 선택 (Tab으로 다중 선택): " || true)
+to_kill=$(printf '%s\n' "$sessions" | fzf_pick --multi --prompt="삭제할 세션 선택 (Tab으로 다중 선택): ")
 
 if [[ -z "$to_kill" ]]; then
     echo "선택 취소"

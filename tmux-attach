@@ -3,11 +3,26 @@
 # fzf로 기존 세션 선택 또는 새 세션 생성
 set -euo pipefail
 
-command -v tmux >/dev/null || { echo "tmux가 설치되지 않았습니다." >&2; exit 1; }
-if ! command -v fzf &>/dev/null; then
-  echo "fzf가 설치되지 않았습니다. 'brew install fzf'로 설치하세요."
-  exit 1
-fi
+_self=$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || echo "${BASH_SOURCE[0]}")
+BINBOX_DIR=$(cd "$(dirname "$_self")" && pwd)
+# shellcheck source=lib/common.sh
+source "$BINBOX_DIR/lib/common.sh" || { echo "lib/common.sh not found" >&2; exit 1; }
+
+usage() {
+  cat <<'EOF'
+tmux-attach — fzf로 기존 tmux 세션 선택 또는 새 세션 생성
+
+사용법:
+  tmux-attach       # 세션 목록에서 선택 (tmux 안이면 전환, 밖이면 attach)
+EOF
+}
+
+case "${1:-}" in
+  -h|--help|help) usage; exit 0 ;;
+esac
+
+need_cmd tmux "brew install tmux"
+need_cmd fzf "brew install fzf"
 
 sessions=$(tmux list-sessions -F "#{session_name}" 2>/dev/null || true)
 
@@ -34,7 +49,7 @@ if [[ -n "${TMUX:-}" ]]; then
   fi
 
   # fzf로 선택
-  selected=$(printf '%s\n' "$other_sessions" | fzf --prompt="전환할 세션 선택: " || true)
+  selected=$(printf '%s\n' "$other_sessions" | fzf_pick --prompt="전환할 세션 선택: ")
 
   if [[ -n "$selected" ]]; then
     tmux switch-client -t "$selected"
@@ -44,7 +59,7 @@ else
   # 새 세션 옵션 추가
   all_options=$(printf "%s\n+ 새 세션 생성" "$sessions")
 
-  selected=$(printf '%s\n' "$all_options" | fzf --prompt="연결할 세션 선택: " || true)
+  selected=$(printf '%s\n' "$all_options" | fzf_pick --prompt="연결할 세션 선택: ")
 
   if [[ -z "$selected" ]]; then
     exit 0
