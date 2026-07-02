@@ -94,3 +94,4 @@ binbox 바깥의 설정이 binbox에 의존하는 곳. **명령어 이름을 바
 - [x] git: `gbr`, `glog`
 - [x] k8s: `klog`, `kexec`, `kpf`
 - [x] AWS: `awsp`, `assm`
+- [x] 시크릿: `sec` (age 암호화 다중 필드 시크릿 스토어, CRUD + fzf copy + env export)

@@ -1,0 +1,278 @@
+#!/usr/bin/env bash
+# sec — age 암호화 시크릿 스토어 (서비스별 다중 필드 CRUD)
+# 스토어는 age로 암호화된 JSON 파일 하나. 복호화→jq 수정→재암호화 파이프라인으로
+# edit를 제외하면 평문이 디스크에 닿지 않는다.
+set -euo pipefail
+umask 077
+
+_self=$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || echo "${BASH_SOURCE[0]}")
+BINBOX_DIR=$(cd "$(dirname "$_self")" && pwd)
+# shellcheck source=lib/common.sh
+source "$BINBOX_DIR/lib/common.sh" || { echo "lib/common.sh not found" >&2; exit 1; }
+
+usage() {
+  cat <<'EOF'
+sec — age 암호화 시크릿 스토어 (서비스별 다중 필드 CRUD)
+
+사용법:
+  sec init                    # age key + 빈 스토어 생성
+  sec set <service> <field>   # 값 저장 (TTY: 숨김 입력 / 파이프: stdin)
+  sec get <service> [field]   # 값 출력 ($(...) 주입용, 단일 필드면 field 생략 가능)
+  sec list [service]          # 서비스 목록 / 필드 목록 (값은 출력하지 않음)
+  sec copy [service] [field]  # 클립보드 복사 (인자 생략 시 fzf 선택)
+  sec env <service>           # export 문 출력 (eval용)
+  sec rm <service> [field]    # 필드/서비스 삭제 (확인 후)
+  sec edit                    # $EDITOR로 전체 JSON 편집
+
+예시:
+  printf '%s' "$TOKEN" | sec set mydb token
+  psql "$(sec get mydb url)"
+  eval "$(sec env mydb)"      # MYDB_USER, MYDB_PASSWORD ...
+  sec copy                    # fzf 선택 → 클립보드
+
+환경변수:
+  BINBOX_SECRETS_FILE  스토어 경로 (기본: ~/.config/binbox/secrets.json.age)
+  BINBOX_AGE_KEY       age identity 경로 (기본: ~/.config/binbox/age.key)
+
+비고:
+  age.key는 별도 백업하고 git에는 넣지 마세요. 스토어 파일은 git 백업 가능.
+EOF
+}
+
+case "${1:-}" in
+  -h|--help|help) usage; exit 0 ;;
+esac
+
+SEC_STORE="${BINBOX_SECRETS_FILE:-$HOME/.config/binbox/secrets.json.age}"
+SEC_KEY="${BINBOX_AGE_KEY:-$HOME/.config/binbox/age.key}"
+
+# 임시파일 일괄 정리 (edit/store_write가 등록)
+_tmpfiles=()
+_cleanup() { rm -f ${_tmpfiles[@]+"${_tmpfiles[@]}"}; }
+trap _cleanup EXIT INT TERM
+
+valid_name() {
+  [[ "$1" =~ ^[A-Za-z0-9._-]+$ ]]
+}
+
+# store_read — 복호화한 JSON을 stdout으로
+store_read() {
+  if [[ ! -f "$SEC_KEY" ]]; then
+    if [[ -f "$SEC_STORE" ]]; then
+      die "age key가 없습니다: $SEC_KEY" \
+          "스토어는 있으므로 백업해둔 age.key를 복사하세요."
+    fi
+    die "age key가 없습니다: $SEC_KEY (sec init 먼저 실행)"
+  fi
+  [[ -f "$SEC_STORE" ]] || die "스토어가 없습니다: $SEC_STORE (sec init 먼저 실행)"
+  age -d -i "$SEC_KEY" "$SEC_STORE" 2>/dev/null \
+    || die "복호화 실패: key가 스토어와 일치하지 않습니다. ($SEC_KEY)"
+}
+
+# store_write — stdin(JSON)을 암호화해 원자적으로 교체
+store_write() {
+  local recipient tmp
+  recipient=$(age-keygen -y "$SEC_KEY")
+  # 같은 파일시스템이어야 mv가 원자적
+  tmp="$SEC_STORE.tmp.$$"
+  _tmpfiles+=("$tmp")
+  age -r "$recipient" -o "$tmp"
+  mv "$tmp" "$SEC_STORE"
+}
+
+require_service() { # JSON SERVICE
+  printf '%s' "$1" | jq -e --arg s "$2" 'has($s)' >/dev/null \
+    || die "존재하지 않는 service: $2"
+}
+
+# resolve_field JSON SERVICE [FIELD] — 필드명 확정 (생략 시 단일 필드일 때만 허용)
+resolve_field() {
+  local json="$1" svc="$2" field="${3:-}" fields count
+  if [[ -n "$field" ]]; then
+    printf '%s' "$field"
+    return 0
+  fi
+  count=$(printf '%s' "$json" | jq -r --arg s "$svc" '.[$s] | length')
+  fields=$(printf '%s' "$json" | jq -r --arg s "$svc" '.[$s] | keys[]')
+  [[ "$count" -gt 0 ]] || die "필드가 없습니다: $svc"
+  [[ "$count" -eq 1 ]] || die "필드를 지정하세요: $(printf '%s' "$fields" | tr '\n' ' ')"
+  printf '%s' "$fields"
+}
+
+json_value() { # JSON SERVICE FIELD — 값 출력, 없으면 die
+  printf '%s' "$1" | jq -er --arg s "$2" --arg f "$3" '.[$s][$f] // empty' \
+    || die "존재하지 않는 field: $2/$3"
+}
+
+env_name() { # NAME — 대문자화 + 비허용 문자 _ 치환
+  printf '%s' "$1" | tr '[:lower:]' '[:upper:]' | tr -c 'A-Z0-9_' '_'
+}
+
+clipboard_copy() {
+  if command -v pbcopy >/dev/null 2>&1; then
+    printf '%s' "$1" | pbcopy
+  elif command -v clip.exe >/dev/null 2>&1; then
+    printf '%s' "$1" | clip.exe
+  elif command -v xclip >/dev/null 2>&1; then
+    printf '%s' "$1" | xclip -selection clipboard
+  else
+    die "클립보드 명령을 찾을 수 없습니다. (pbcopy/clip.exe/xclip)"
+  fi
+}
+
+cmd_init() {
+  [[ ! -f "$SEC_KEY" ]] || die "age key가 이미 있습니다: $SEC_KEY"
+  [[ ! -f "$SEC_STORE" ]] || die "스토어가 이미 있습니다: $SEC_STORE"
+  mkdir -p "$(dirname "$SEC_KEY")" "$(dirname "$SEC_STORE")"
+  age-keygen -o "$SEC_KEY"
+  printf '{}\n' | store_write
+  cat >&2 <<EOF
+초기화 완료:
+  key:   $SEC_KEY (백업 필수, git 금지)
+  store: $SEC_STORE (git 백업 가능)
+EOF
+}
+
+cmd_set() {
+  local svc="${1:-}" field="${2:-}" value json new
+  [[ -n "$svc" && -n "$field" ]] || die "사용법: sec set <service> <field>"
+  valid_name "$svc" || die "이름은 영문/숫자/._- 만 허용합니다: $svc"
+  valid_name "$field" || die "이름은 영문/숫자/._- 만 허용합니다: $field"
+  if [[ -t 0 ]]; then
+    read -rs -p "${svc}/${field} 값 입력: " value
+    echo >&2
+  else
+    value=$(cat)
+  fi
+  [[ -n "$value" ]] || die "빈 값은 저장할 수 없습니다."
+  json=$(store_read)
+  new=$(printf '%s' "$json" \
+    | v="$value" jq --arg s "$svc" --arg f "$field" '.[$s][$f] = env.v')
+  printf '%s\n' "$new" | store_write
+  echo "저장됨: ${svc}/${field}" >&2
+}
+
+cmd_get() {
+  local svc="${1:-}" field="${2:-}" json value
+  [[ -n "$svc" ]] || die "사용법: sec get <service> [field]"
+  json=$(store_read)
+  require_service "$json" "$svc"
+  field=$(resolve_field "$json" "$svc" "$field")
+  value=$(json_value "$json" "$svc" "$field")
+  printf '%s\n' "$value"
+}
+
+cmd_list() {
+  local svc="${1:-}" json
+  json=$(store_read)
+  if [[ -z "$svc" ]]; then
+    printf '%s' "$json" | jq -r 'keys[]'
+  else
+    require_service "$json" "$svc"
+    printf '%s' "$json" | jq -r --arg s "$svc" '.[$s] | keys[]'
+  fi
+}
+
+cmd_copy() {
+  local svc="${1:-}" field="${2:-}" json line value
+  json=$(store_read)
+  if [[ -z "$svc" ]]; then
+    need_cmd fzf "brew install fzf"
+    line=$(printf '%s' "$json" \
+      | jq -r 'to_entries[] | .key as $s | .value | keys[] | "\($s)\t\(.)"' \
+      | fzf_pick --prompt="secret 선택: ")
+    [[ -n "$line" ]] || exit 0
+    svc="${line%%$'\t'*}"
+    field="${line#*$'\t'}"
+  else
+    require_service "$json" "$svc"
+    field=$(resolve_field "$json" "$svc" "$field")
+  fi
+  value=$(json_value "$json" "$svc" "$field")
+  clipboard_copy "$value"
+  echo "복사됨: ${svc}/${field}" >&2
+}
+
+cmd_env() {
+  local svc="${1:-}" json fields f value name
+  [[ -n "$svc" ]] || die "사용법: sec env <service>"
+  # eval 없이 실행하면 값이 화면에 노출되므로 TTY에서는 거부
+  if [[ -t 1 ]]; then
+    die "stdout이 터미널입니다. 값 노출 방지를 위해 eval로 사용하세요:" \
+        "  eval \"\$(sec env $svc)\""
+  fi
+  json=$(store_read)
+  require_service "$json" "$svc"
+  fields=$(printf '%s' "$json" | jq -r --arg s "$svc" '.[$s] | keys[]')
+  [[ -n "$fields" ]] || die "필드가 없습니다: $svc"
+  while IFS= read -r f; do
+    value=$(json_value "$json" "$svc" "$f")
+    name="$(env_name "$svc")_$(env_name "$f")"
+    if [[ "$name" =~ ^[0-9] ]]; then
+      name="_$name"
+    fi
+    printf 'export %s=%q\n' "$name" "$value"
+  done <<<"$fields"
+}
+
+cmd_rm() {
+  local svc="${1:-}" field="${2:-}" json new
+  [[ -n "$svc" ]] || die "사용법: sec rm <service> [field]"
+  json=$(store_read)
+  require_service "$json" "$svc"
+  if [[ -n "$field" ]]; then
+    printf '%s' "$json" | jq -e --arg s "$svc" --arg f "$field" '.[$s] | has($f)' >/dev/null \
+      || die "존재하지 않는 field: ${svc}/${field}"
+    confirm "${svc}/${field} 을(를) 삭제할까요?" || exit 0
+    new=$(printf '%s' "$json" | jq --arg s "$svc" --arg f "$field" \
+      'del(.[$s][$f]) | if .[$s] == {} then del(.[$s]) else . end')
+  else
+    confirm "service ${svc} 전체를 삭제할까요?" || exit 0
+    new=$(printf '%s' "$json" | jq --arg s "$svc" 'del(.[$s])')
+  fi
+  printf '%s\n' "$new" | store_write
+  echo "삭제됨: ${svc}${field:+/$field}" >&2
+}
+
+cmd_edit() {
+  local json tmp
+  json=$(store_read)
+  tmp=$(mktemp "${TMPDIR:-/tmp}/sec-edit.XXXXXX")
+  _tmpfiles+=("$tmp")
+  printf '%s\n' "$json" > "$tmp"
+  while true; do
+    # EDITOR는 "code --wait"처럼 인자를 포함할 수 있어 의도적으로 word split
+    # shellcheck disable=SC2086
+    ${EDITOR:-vi} "$tmp"
+    if jq -e . "$tmp" >/dev/null 2>&1; then
+      break
+    fi
+    confirm "JSON이 올바르지 않습니다. 다시 편집할까요?" || die "변경을 취소했습니다."
+  done
+  store_write < "$tmp"
+  rm -f "$tmp"
+  echo "저장됨: $SEC_STORE" >&2
+}
+
+cmd="${1:-}"
+if [[ -z "$cmd" ]]; then
+  usage >&2
+  exit 1
+fi
+shift
+
+need_cmd age "brew install age"
+need_cmd age-keygen "brew install age"
+need_cmd jq "brew install jq"
+
+case "$cmd" in
+  init) cmd_init "$@" ;;
+  set)  cmd_set "$@" ;;
+  get)  cmd_get "$@" ;;
+  list|ls) cmd_list "$@" ;;
+  copy|cp) cmd_copy "$@" ;;
+  env)  cmd_env "$@" ;;
+  rm)   cmd_rm "$@" ;;
+  edit) cmd_edit "$@" ;;
+  *) usage >&2; die "알 수 없는 명령: $cmd" ;;
+esac

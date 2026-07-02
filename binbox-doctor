@@ -39,6 +39,8 @@ check_cmd terraform "optional: tfplan/tfsum" "brew install terraform"
 check_cmd tf-summarize "optional: tfsum" "install tf-summarize"
 check_cmd aws "optional: awsp/assm" "brew install awscli"
 check_cmd session-manager-plugin "optional: assm" "brew install session-manager-plugin"
+check_cmd age "optional: sec" "brew install age"
+check_cmd jq "optional: sec" "brew install jq"
 check_cmd shellcheck "optional: binbox-check" "brew install shellcheck"
 check_cmd bats "optional: make test" "brew install bats-core"
 

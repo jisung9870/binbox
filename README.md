@@ -111,6 +111,29 @@ tfplan && tfsum tree
 tfsum md plan-summary.md
 ```
 
+### 시크릿 — sec
+
+개인 토큰/테스트 계정 등의 비밀값을 age 암호화 JSON 파일로 관리한다.
+서비스 하나에 user/password/url/token 같은 필드를 여러 개 담는 구조.
+
+| 명령어 | 설명 |
+|--------|------|
+| `sec` | age 암호화 시크릿 스토어 CRUD (init/set/get/list/copy/env/rm/edit) |
+
+```bash
+sec init                            # age key + 빈 스토어 생성 (최초 1회)
+printf '%s' "$TOKEN" | sec set mydb token   # 값은 stdin/숨김 입력으로만 (argv 금지)
+psql "$(sec get mydb url)"          # 스크립트에 값 주입
+eval "$(sec env mydb)"              # MYDB_USER, MYDB_PASSWORD ... export
+sec copy                            # fzf 선택 → 클립보드 (화면 미노출)
+sec edit                            # $EDITOR로 전체 JSON 편집
+```
+
+- 스토어: `~/.config/binbox/secrets.json.age` (git 백업 가능),
+  키: `~/.config/binbox/age.key` (**별도 백업 필수, git 금지**)
+- 경로는 `BINBOX_SECRETS_FILE` / `BINBOX_AGE_KEY`로 변경 가능.
+- `list`/`copy`/에러 메시지에 값이 노출되지 않고, `edit` 외에는 평문이 디스크에 닿지 않는다.
+
 ### Docker — dx
 
 호스트에 도구를 설치하지 않고 컨테이너로 실행한다. `dx.d/`에 설정 파일을 추가하면 자동 인식.
@@ -199,5 +222,6 @@ source "$BINBOX_DIR/lib/common.sh" || { echo "lib/common.sh not found" >&2; exit
 - kubectl — kctx, kns, klog, kexec, kpf
 - terraform, tf-summarize — tfplan, tfsum
 - aws cli, session-manager-plugin — awsp, assm
+- age, jq — sec
 - shellcheck, bats-core — 개발용
 - ss/iproute2 — Linux portcheck (없으면 lsof 대체)
