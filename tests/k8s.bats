@@ -150,3 +150,69 @@ stub_fzf_cancel() {
   [ "$status" -eq 0 ]
   grep -q 'port-forward my-pod 8080:8080' "$STUB_DIR/kubectl.calls"
 }
+
+# --- lib/k8s.sh 단위 테스트 ---
+
+@test "k8s_pick_pod: outputs first column of selection" {
+  stub_kubectl "app"
+  stub_fzf_pick_first
+  run bash -c "source '$BINBOX_DIR/lib/k8s.sh'; k8s_pick_pod ''"
+  [ "$status" -eq 0 ]
+  [ "$output" = "pod-a" ]
+}
+
+@test "k8s_pick_pod: passes -n to kubectl" {
+  stub_kubectl "app"
+  stub_fzf_pick_first
+  run bash -c "source '$BINBOX_DIR/lib/k8s.sh'; k8s_pick_pod myns"
+  [ "$status" -eq 0 ]
+  grep -q 'get pods -n myns --no-headers' "$STUB_DIR/kubectl.calls"
+}
+
+@test "k8s_pick_pod: empty pod list dies" {
+  make_stub kubectl 'exit 1'
+  stub_fzf_pick_first
+  run bash -c "source '$BINBOX_DIR/lib/k8s.sh'; k8s_pick_pod '' 2>&1"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"pod 목록"* ]]
+}
+
+@test "k8s_pick_pod: cancel returns 0 with empty output" {
+  stub_kubectl "app"
+  stub_fzf_cancel
+  run bash -c "source '$BINBOX_DIR/lib/k8s.sh'; k8s_pick_pod ''"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "k8s_pick_container: single container returns 0 with empty output" {
+  stub_kubectl "app"
+  stub_fzf_pick_first
+  run bash -c "source '$BINBOX_DIR/lib/k8s.sh'; k8s_pick_container '' my-pod"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "k8s_pick_container: multiple containers picks via fzf" {
+  stub_kubectl "app sidecar"
+  stub_fzf_pick_first
+  run bash -c "source '$BINBOX_DIR/lib/k8s.sh'; k8s_pick_container '' my-pod"
+  [ "$status" -eq 0 ]
+  [ "$output" = "app" ]
+}
+
+@test "k8s_pick_container: cancel returns nonzero with empty output" {
+  stub_kubectl "app sidecar"
+  stub_fzf_cancel
+  run bash -c "source '$BINBOX_DIR/lib/k8s.sh'; k8s_pick_container '' my-pod"
+  [ "$status" -ne 0 ]
+  [ -z "$output" ]
+}
+
+@test "k8s_pick_container: kubectl failure returns 0 with empty output" {
+  make_stub kubectl 'exit 1'
+  stub_fzf_pick_first
+  run bash -c "source '$BINBOX_DIR/lib/k8s.sh'; k8s_pick_container '' my-pod"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
