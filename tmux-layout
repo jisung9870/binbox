@@ -3,8 +3,12 @@
 # fzf로 레이아웃 선택 후 세션 생성
 set -euo pipefail
 
-SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
-LAYOUT_DIR="${SCRIPT_DIR}/tmux-layouts"
+_self=$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || echo "${BASH_SOURCE[0]}")
+BINBOX_DIR=$(cd "$(dirname "$_self")" && pwd)
+# shellcheck source=lib/common.sh
+source "$BINBOX_DIR/lib/common.sh" || { echo "lib/common.sh not found" >&2; exit 1; }
+
+LAYOUT_DIR="$BINBOX_DIR/tmux-layouts"
 
 usage() {
   cat <<'EOF'
@@ -26,25 +30,20 @@ esac
 SESSION_NAME="${1:-}"
 PROJECT_DIR="${2:-$PWD}"
 
-command -v tmux >/dev/null || { echo "tmux가 설치되지 않았습니다." >&2; exit 1; }
-if ! command -v fzf &>/dev/null; then
-  echo "fzf가 설치되지 않았습니다. 'brew install fzf'로 설치하세요." >&2
-  exit 1
-fi
+need_cmd tmux "brew install tmux"
+need_cmd fzf "brew install fzf"
 
 if [[ ! -d "$LAYOUT_DIR" ]]; then
-  echo "레이아웃 디렉토리가 없습니다: $LAYOUT_DIR" >&2
-  exit 1
+  die "레이아웃 디렉토리가 없습니다: $LAYOUT_DIR"
 fi
 
 layouts=$(find "$LAYOUT_DIR" -maxdepth 1 -type f -name '*-layout' -perm -111 -print 2>/dev/null | sed 's#.*/##; s/-layout$//' | sort)
 
 if [[ -z "$layouts" ]]; then
-  echo "사용 가능한 레이아웃이 없습니다."
-  exit 1
+  die "사용 가능한 레이아웃이 없습니다."
 fi
 
-selected=$(printf '%s\n' "$layouts" | fzf --prompt="레이아웃 선택: " || true)
+selected=$(printf '%s\n' "$layouts" | fzf_pick --prompt="레이아웃 선택: ")
 
 if [[ -z "$selected" ]]; then
   exit 0
@@ -59,8 +58,7 @@ if [[ -z "$SESSION_NAME" ]]; then
 fi
 
 if [[ ! -d "$PROJECT_DIR" ]]; then
-  echo "프로젝트 디렉토리가 없습니다: $PROJECT_DIR" >&2
-  exit 1
+  die "프로젝트 디렉토리가 없습니다: $PROJECT_DIR"
 fi
 
 exec "$LAYOUT_DIR/${selected}-layout" "$SESSION_NAME" "$PROJECT_DIR"

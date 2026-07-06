@@ -109,6 +109,58 @@ teardown() {
   [[ "$output" == *"MD2JIRA_HOME"* ]]
 }
 
+# --- tmux ---
+
+@test "tmux-sessionizer/tmux-layout/tmux-kill-pattern -h: exit 0" {
+  run "$BINBOX_DIR/tmux-sessionizer" -h
+  [ "$status" -eq 0 ]
+  run "$BINBOX_DIR/tmux-layout" -h
+  [ "$status" -eq 0 ]
+  run "$BINBOX_DIR/tmux-kill-pattern" -h
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"사용법"* ]]
+}
+
+@test "tmux-kill-pattern: no args prints usage and exits 1" {
+  run "$BINBOX_DIR/tmux-kill-pattern"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"사용법"* ]]
+}
+
+@test "tmux-kill-pattern: no matching sessions exits 0" {
+  make_stub tmux 'if [[ "${1:-}" == "list-sessions" ]]; then printf "alpha\nbeta\n"; fi'
+  run "$BINBOX_DIR/tmux-kill-pattern" zzz
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"매칭되는 세션이 없습니다"* ]]
+}
+
+@test "tmux-kill-pattern: y kills only matching sessions" {
+  make_stub tmux "
+case \"\${1:-}\" in
+  list-sessions) printf 'dev-a\ndev-b\nprod\n' ;;
+  kill-session) printf '%s\n' \"\$*\" >> '$STUB_DIR/tmux.calls' ;;
+esac
+"
+  run bash -c "printf 'y' | '$BINBOX_DIR/tmux-kill-pattern' dev"
+  [ "$status" -eq 0 ]
+  grep -q 'kill-session -t dev-a' "$STUB_DIR/tmux.calls"
+  grep -q 'kill-session -t dev-b' "$STUB_DIR/tmux.calls"
+  ! grep -q 'prod' "$STUB_DIR/tmux.calls"
+}
+
+@test "tmux-kill-pattern: n cancels without killing" {
+  make_stub tmux "
+case \"\${1:-}\" in
+  list-sessions) printf 'dev-a\n' ;;
+  kill-session) printf '%s\n' \"\$*\" >> '$STUB_DIR/tmux.calls' ;;
+esac
+"
+  run bash -c "printf 'n' | '$BINBOX_DIR/tmux-kill-pattern' dev"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"취소됨"* ]]
+  [ ! -f "$STUB_DIR/tmux.calls" ]
+}
+
 # --- help paths ---
 
 @test "kctx/kns/tmux-attach -h: exit 0" {

@@ -2,6 +2,11 @@
 # tmux-sessionizer — 프로젝트 디렉토리를 fzf로 선택하여 tmux 세션 생성/전환
 set -euo pipefail
 
+_self=$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || echo "${BASH_SOURCE[0]}")
+BINBOX_DIR=$(cd "$(dirname "$_self")" && pwd)
+# shellcheck source=lib/common.sh
+source "$BINBOX_DIR/lib/common.sh" || { echo "lib/common.sh not found" >&2; exit 1; }
+
 usage() {
   cat <<'EOF'
 tmux-sessionizer — 프로젝트 디렉토리를 fzf로 선택하여 tmux 세션 생성/전환
@@ -34,15 +39,11 @@ else
   PROJECT_DIRS=("$HOME/home/projects" "$HOME/home/work")
 fi
 
-command -v tmux >/dev/null || { echo "tmux가 설치되지 않았습니다." >&2; exit 1; }
-if ! command -v fzf &>/dev/null; then
-  echo "fzf가 설치되지 않았습니다. 'brew install fzf'로 설치하세요." >&2
-  exit 1
-fi
+need_cmd tmux "brew install tmux"
+need_cmd fzf "brew install fzf"
 
 if [[ ${#PROJECT_DIRS[@]} -eq 0 ]]; then
-  echo "프로젝트 디렉토리가 설정되어 있지 않습니다: $CONFIG_FILE" >&2
-  exit 1
+  die "프로젝트 디렉토리가 설정되어 있지 않습니다: $CONFIG_FILE"
 fi
 
 valid_dirs=()
@@ -53,9 +54,7 @@ for dir in "${PROJECT_DIRS[@]}"; do
 done
 
 if [[ ${#valid_dirs[@]} -eq 0 ]]; then
-  echo "사용 가능한 프로젝트 디렉토리가 없습니다." >&2
-  echo "설정 파일을 확인하세요: $CONFIG_FILE" >&2
-  exit 1
+  die "사용 가능한 프로젝트 디렉토리가 없습니다." "설정 파일을 확인하세요: $CONFIG_FILE"
 fi
 
 read_candidates() {
@@ -100,11 +99,10 @@ record_recent() {
 
 candidates=$(ordered_candidates)
 if [[ -z "$candidates" ]]; then
-  echo "선택할 프로젝트가 없습니다. 프로젝트 디렉토리에 하위 디렉토리를 추가하세요." >&2
-  exit 1
+  die "선택할 프로젝트가 없습니다. 프로젝트 디렉토리에 하위 디렉토리를 추가하세요."
 fi
 
-selected=$(printf '%s\n' "$candidates" | fzf || true)
+selected=$(printf '%s\n' "$candidates" | fzf_pick --prompt="프로젝트 선택: ")
 
 if [[ -z $selected ]]; then
   exit 0
@@ -112,7 +110,7 @@ fi
 
 record_recent "$selected"
 
-selected_name=$(basename "$selected" | tr '.:' '__')
+selected_name=$(sanitize_session "$(basename "$selected")")
 
 tmux_running=$(pgrep tmux || true)
 
