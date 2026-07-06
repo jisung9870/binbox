@@ -2,11 +2,20 @@
 # portcheck — 특정 포트를 사용 중인 프로세스 확인
 set -euo pipefail
 
+_self=$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || echo "${BASH_SOURCE[0]}")
+BINBOX_DIR=$(cd "$(dirname "$_self")" && pwd)
+# shellcheck source=lib/common.sh
+source "$BINBOX_DIR/lib/common.sh" || { echo "lib/common.sh not found" >&2; exit 1; }
+
 usage() {
   echo "사용법: portcheck <포트번호> [--kill]"
   echo "예시: portcheck 8080"
   echo "      portcheck 3000 --kill"
 }
+
+case "${1:-}" in
+  -h|--help|help) usage; exit 0 ;;
+esac
 
 if [[ -z "${1:-}" ]]; then
   usage
@@ -17,18 +26,16 @@ PORT="$1"
 KILL="${2:-}"
 
 if [[ ! "$PORT" =~ ^[0-9]+$ ]] || ((PORT < 1 || PORT > 65535)); then
-  echo "올바른 포트 번호가 아닙니다: $PORT" >&2
   usage >&2
-  exit 1
+  die "올바른 포트 번호가 아닙니다: $PORT"
 fi
 
 if [[ -n "$KILL" && "$KILL" != "--kill" ]]; then
-  echo "알 수 없는 옵션: $KILL" >&2
   usage >&2
-  exit 1
+  die "알 수 없는 옵션: $KILL"
 fi
 
-command -v lsof >/dev/null || { echo "lsof not found in PATH" >&2; exit 1; }
+need_cmd lsof "usually preinstalled on macOS"
 
 if [[ "$(uname)" == "Darwin" ]]; then
   result=$(lsof -i :"$PORT" -P -n 2>/dev/null || true)
@@ -57,9 +64,7 @@ if [[ "$KILL" == "--kill" ]]; then
   if [[ -n "$pids" ]]; then
     echo "종료 대상 PID:"
     printf '%s\n' "$pids"
-    read -r -p "위 PID를 모두 종료하시겠습니까? (y/n) " -n 1
-    echo
-    if [[ $REPLY =~ ^[Yy]$ ]]; then
+    if confirm "위 PID를 모두 종료하시겠습니까?"; then
       failed=0
       while IFS= read -r pid; do
         [[ -n "$pid" ]] || continue

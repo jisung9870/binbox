@@ -1,12 +1,34 @@
 #!/usr/bin/env bash
 # tfplan — terraform plan을 tfplan 파일로 저장
-# Usage:
-#   tfplan                       # terraform plan -out=tfplan
-#   tfplan -var-file=qa.tfvars   # 추가 인자 패스스루
-#   tfplan -target=aws_xxx.yyy   # 특정 리소스만
 set -euo pipefail
 
-command -v terraform >/dev/null || { echo "terraform not found" >&2; exit 1; }
+_self=$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || echo "${BASH_SOURCE[0]}")
+BINBOX_DIR=$(cd "$(dirname "$_self")" && pwd)
+# shellcheck source=lib/common.sh
+source "$BINBOX_DIR/lib/common.sh" || { echo "lib/common.sh not found" >&2; exit 1; }
+
+usage() {
+  cat <<'EOF'
+tfplan — terraform plan을 tfplan 파일로 저장
+
+사용법:
+  tfplan [terraform plan 인자...]
+
+예시:
+  tfplan                       # terraform plan -out=tfplan
+  tfplan -var-file=qa.tfvars   # 추가 인자 패스스루
+  tfplan -target=aws_xxx.yyy   # 특정 리소스만
+
+Planfile:
+  기본값은 ./tfplan. 환경변수 TFPLAN_FILE로 지정 가능. (tfsum과 공유)
+EOF
+}
+
+case "${1:-}" in
+  -h|--help|help) usage; exit 0 ;;
+esac
+
+need_cmd terraform "brew install terraform"
 
 PLAN_FILE="${TFPLAN_FILE:-tfplan}"
 terraform plan -out="$PLAN_FILE" "$@"

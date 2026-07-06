@@ -38,6 +38,34 @@ teardown() {
   [[ "$output" == *"알 수 없는 옵션"* ]]
 }
 
+@test "portcheck -h: exits 0" {
+  run "$BINBOX_DIR/portcheck" -h
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"사용법"* ]]
+}
+
+@test "portcheck --kill: n cancels without killing" {
+  make_stub uname 'echo Darwin'
+  make_stub lsof "
+case \"\$*\" in
+  *' -t') printf '12345\n' ;;
+  *) printf 'COMMAND PID\nfoo 12345\n' ;;
+esac
+"
+  run bash -c "printf 'n' | '$BINBOX_DIR/portcheck' 8080 --kill"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"종료 대상 PID"* ]]
+  [[ "$output" != *"종료됨"* ]]
+}
+
+# --- tfplan ---
+
+@test "tfplan -h: exits 0" {
+  run "$BINBOX_DIR/tfplan" -h
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"사용법"* ]]
+}
+
 # --- dx ---
 
 @test "dx: no args prints usage and exits 1" {
