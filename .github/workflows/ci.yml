@@ -7,20 +7,33 @@ on:
 
 jobs:
   check:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+
+      - name: install test deps (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y bats age jq
+
+      - name: install test deps (macOS)
+        if: runner.os == 'macOS'
+        run: brew install bats-core age shellcheck
+
+      # macOS 러너는 PATH에 brew bash 5.x가 있어 `env bash`가 그걸 집는다.
+      # /bin/bash(3.2)를 PATH 최상단에 shim해서 bash 3.2 호환성을 실제로 검증한다.
+      - name: force system bash 3.2 (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          mkdir -p "$HOME/bash32"
+          ln -s /bin/bash "$HOME/bash32/bash"
+          echo "$HOME/bash32" >> "$GITHUB_PATH"
 
       - name: shellcheck
         run: ./binbox-check
 
-      - name: install test deps
-        run: sudo apt-get update && sudo apt-get install -y bats age jq
-
       - name: bats tests
-        run: |
-          if [ -d tests ]; then
-            bats tests/
-          else
-            echo "no tests directory yet, skipping"
-          fi
+        run: bats tests/
