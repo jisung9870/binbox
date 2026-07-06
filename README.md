@@ -42,18 +42,17 @@ bb <Tab>          # zsh 자동완성
 
 | 명령어 | 설명 |
 |--------|------|
-| `tmux-sessionizer` | 프로젝트 디렉토리를 fzf로 선택하여 세션 생성/전환 (최근 항목 우선) |
-| `tmux-attach` | 기존 세션 선택 또는 새 세션 생성 |
-| `tmux-layout` | 레이아웃 선택 후 세션 생성 (golang, k8s, terraform) |
-| `tmux-kill-sessions` | fzf 다중 선택으로 세션 삭제 |
-| `tmux-kill-pattern` | 패턴 매칭으로 세션 일괄 삭제 |
+| `tm` (= `tm go`) | 프로젝트 디렉토리를 fzf로 선택하여 세션 생성/전환 (최근 항목 우선) |
+| `tm attach` | 기존 세션 선택 또는 새 세션 생성 |
+| `tm layout` | 레이아웃 선택 후 세션 생성 (golang, k8s, terraform) |
+| `tm kill [패턴]` | fzf 다중 선택 / 패턴 매칭으로 세션 삭제 |
 | `agents` | Claude/Codex tmux pane 상태 조회 및 fzf 점프 |
 
 ```bash
-tmux-sessionizer               # 프로젝트 선택 → 세션 생성
-tmux-layout my-proj ~/work/p   # 레이아웃 선택 → 세션 생성
-tmux-kill-pattern k8s          # k8s 패턴 세션 일괄 삭제
-agents                         # agent pane 선택 후 이동 (--list, --usage)
+tm                      # 프로젝트 선택 → 세션 생성
+tm layout my-proj ~/w/p # 레이아웃 선택 → 세션 생성
+tm kill k8s             # k8s 패턴 세션 일괄 삭제
+agents                  # agent pane 선택 후 이동 (--list, --usage)
 ```
 
 ### git
@@ -169,9 +168,10 @@ DOCKER_OPTS=(
 
 ## 설정
 
-### tmux-sessionizer
+### tm 프로젝트 목록
 
 프로젝트 디렉토리 목록은 설정 파일로 관리한다. 머신별로 파일만 다르게 두면 된다.
+(경로는 구 tmux-sessionizer 시절 그대로 — nvim Telescope가 이 파일을 직접 파싱하므로 유지)
 
 ```bash
 mkdir -p ~/.config/tmux-sessionizer
@@ -188,7 +188,7 @@ EOF
 
 ### tmux 레이아웃 추가
 
-`tmux-layouts/`에 실행 가능한 `*-layout` 파일을 추가하면 `tmux-layout`이 자동 인식한다.
+`tmux-layouts/`에 실행 가능한 `*-layout` 파일을 추가하면 `tm layout`이 자동 인식한다.
 
 ## 개발
 

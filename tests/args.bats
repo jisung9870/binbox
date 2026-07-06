@@ -137,65 +137,82 @@ esac
   [[ "$output" == *"MD2JIRA_HOME"* ]]
 }
 
-# --- tmux ---
+# --- tm (tmux 통합) ---
 
-@test "tmux-sessionizer/tmux-layout/tmux-kill-pattern -h: exit 0" {
-  run "$BINBOX_DIR/tmux-sessionizer" -h
-  [ "$status" -eq 0 ]
-  run "$BINBOX_DIR/tmux-layout" -h
-  [ "$status" -eq 0 ]
-  run "$BINBOX_DIR/tmux-kill-pattern" -h
+@test "tm -h: exits 0" {
+  run "$BINBOX_DIR/tm" -h
   [ "$status" -eq 0 ]
   [[ "$output" == *"사용법"* ]]
 }
 
-@test "tmux-kill-pattern: no args prints usage and exits 1" {
-  run "$BINBOX_DIR/tmux-kill-pattern"
+@test "tm: unknown subcommand errors" {
+  run "$BINBOX_DIR/tm" bogus
   [ "$status" -eq 1 ]
-  [[ "$output" == *"사용법"* ]]
+  [[ "$output" == *"알 수 없는 서브커맨드"* ]]
 }
 
-@test "tmux-kill-pattern: no matching sessions exits 0" {
+@test "tm kill <pattern>: no matching sessions exits 0" {
   make_stub tmux 'if [[ "${1:-}" == "list-sessions" ]]; then printf "alpha\nbeta\n"; fi'
-  run "$BINBOX_DIR/tmux-kill-pattern" zzz
+  run "$BINBOX_DIR/tm" kill zzz
   [ "$status" -eq 0 ]
   [[ "$output" == *"매칭되는 세션이 없습니다"* ]]
 }
 
-@test "tmux-kill-pattern: y kills only matching sessions" {
+@test "tm kill <pattern>: y kills only matching sessions" {
   make_stub tmux "
 case \"\${1:-}\" in
   list-sessions) printf 'dev-a\ndev-b\nprod\n' ;;
   kill-session) printf '%s\n' \"\$*\" >> '$STUB_DIR/tmux.calls' ;;
 esac
 "
-  run bash -c "printf 'y' | '$BINBOX_DIR/tmux-kill-pattern' dev"
+  run bash -c "printf 'y' | '$BINBOX_DIR/tm' kill dev"
   [ "$status" -eq 0 ]
   grep -q 'kill-session -t dev-a' "$STUB_DIR/tmux.calls"
   grep -q 'kill-session -t dev-b' "$STUB_DIR/tmux.calls"
   ! grep -q 'prod' "$STUB_DIR/tmux.calls"
 }
 
-@test "tmux-kill-pattern: n cancels without killing" {
+@test "tm kill <pattern>: n cancels without killing" {
   make_stub tmux "
 case \"\${1:-}\" in
   list-sessions) printf 'dev-a\n' ;;
   kill-session) printf '%s\n' \"\$*\" >> '$STUB_DIR/tmux.calls' ;;
 esac
 "
-  run bash -c "printf 'n' | '$BINBOX_DIR/tmux-kill-pattern' dev"
+  run bash -c "printf 'n' | '$BINBOX_DIR/tm' kill dev"
   [ "$status" -eq 0 ]
   [[ "$output" == *"취소됨"* ]]
   [ ! -f "$STUB_DIR/tmux.calls" ]
 }
 
+@test "tm kill: fzf multi-select kills chosen sessions" {
+  make_stub tmux "
+case \"\${1:-}\" in
+  list-sessions) printf 'dev-a\ndev-b\n' ;;
+  kill-session) printf '%s\n' \"\$*\" >> '$STUB_DIR/tmux.calls' ;;
+esac
+"
+  make_stub fzf 'cat'
+  run "$BINBOX_DIR/tm" kill
+  [ "$status" -eq 0 ]
+  grep -q 'kill-session -t dev-a' "$STUB_DIR/tmux.calls"
+  grep -q 'kill-session -t dev-b' "$STUB_DIR/tmux.calls"
+}
+
+@test "tm kill: fzf cancel exits 0 without killing" {
+  make_stub tmux 'if [[ "${1:-}" == "list-sessions" ]]; then printf "dev-a\n"; fi'
+  make_stub fzf 'cat >/dev/null; exit 130'
+  run "$BINBOX_DIR/tm" kill
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"선택 취소"* ]]
+  [ ! -f "$STUB_DIR/tmux.calls" ]
+}
+
 # --- help paths ---
 
-@test "kctx/kns/tmux-attach -h: exit 0" {
+@test "kctx/kns -h: exit 0" {
   run "$BINBOX_DIR/kctx" -h
   [ "$status" -eq 0 ]
   run "$BINBOX_DIR/kns" -h
-  [ "$status" -eq 0 ]
-  run "$BINBOX_DIR/tmux-attach" -h
   [ "$status" -eq 0 ]
 }

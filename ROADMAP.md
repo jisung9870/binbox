@@ -19,8 +19,8 @@ binbox의 개선 방향과 계획. 완료된 항목은 기록으로 남긴다.
 - [ ] **bb 일원화 — 개별 명령어 PATH 제거 검토** (아래 "외부 결합 지점" 선행 조치 필수)
   - 스크립트를 `libexec/` 하위로 이동해 PATH에서 숨기고 `bb`만 노출
   - 선행 조치: 외부 설정에서 개별 명령어를 직접 호출하는 곳을 먼저 수정
-    - `~/.config/nvim/lua/plugins/terminal.lua:58` — toggleterm `<leader>tp`의 `cmd = "tmux-sessionizer"` → `bb tmux-sessionizer`
-    - `~/.tmux.conf:159` — `bind f run-shell "tmux neww tmux-sessionizer"` → `bb tmux-sessionizer`
+    - `~/.config/nvim/lua/plugins/terminal.lua:58` — toggleterm `<leader>tp`의 `cmd = "tm"` → `bb tm`
+    - `~/.tmux.conf:160` — `bind f run-shell "tmux neww tm"` → `bb tm`
   - `bb list`/`resolve_tool`/`binbox-check`/`make install`의 탐색 경로를 `libexec/`로 변경
   - 자주 쓰는 명령은 `.zshrc` alias로 복원 가능 (예: `alias kctx='bb kctx'`)
 - [ ] `bb new <name>` — 프롤로그/usage 템플릿이 채워진 새 스크립트 생성
@@ -43,13 +43,14 @@ binbox 바깥의 설정이 binbox에 의존하는 곳. **명령어 이름을 바
 
 | 위치 | 내용 |
 |------|------|
-| `~/.config/nvim/lua/plugins/terminal.lua:58` | toggleterm `<leader>tp`가 `tmux-sessionizer` 실행 |
-| `~/.tmux.conf:159` | `bind f run-shell "tmux neww tmux-sessionizer"` |
+| `~/.config/nvim/lua/plugins/terminal.lua:58` | toggleterm `<leader>tp`가 `tm` 실행 |
+| `~/.tmux.conf:160` | `bind f run-shell "tmux neww tm"` |
 
 ### 설정 파일 포맷 공유 (bb와 무관, 포맷 변경 시 주의)
 
 - `~/.config/tmux-sessionizer/dirs` — nvim의 `editor.lua:7`(Telescope 프로젝트 목록)이
   이 파일을 **직접 파싱**한다 (`#` 주석, `~` 확장 규칙 포함).
+  `tm`으로 통합한 뒤에도 이 경로/포맷은 그대로 유지한다 (tm go가 계속 읽는다).
   binbox 쪽에서 파일 위치/포맷을 바꾸면 nvim 쪽은 조용히 폴백으로 빠지므로
   lazyvim-config 저장소와 함께 수정해야 한다.
 
@@ -79,9 +80,13 @@ binbox 바깥의 설정이 binbox에 의존하는 곳. **명령어 이름을 바
       confirm()/tmux-kill-pattern/portcheck y·n 플로우
 - [x] 개별 명령어 zsh 완성 (`completions/_binbox`) — kctx: context, kns/klog/kexec/kpf:
       namespace·pod(-n 존중), gbr: 브랜치, awsp: profile, tfsum/sec: 서브커맨드,
-      dx: 도구, tmux-kill-pattern: 세션, tmux-layout: 레이아웃.
+      dx: 도구, tm: 서브커맨드·세션·레이아웃.
       `bb <tool> <Tab>`도 `_bb`가 shift 후 `_normal`로 위임해 동일하게 동작.
       sec 서비스명은 복호화가 필요해 의도적으로 제외
+- [x] **tmux 5종을 `tm` 통합 명령으로 병합** — `tm`(=`tm go`, 구 sessionizer),
+      `tm attach`, `tm layout`, `tm kill [패턴]`(구 kill-sessions + kill-pattern 통합).
+      설정/상태 경로(`~/.config/tmux-sessionizer/*`)는 nvim 결합 때문에 그대로 유지.
+      외부 호출 지점(~/.tmux.conf bind f, nvim terminal.lua)도 `tm`으로 함께 수정
 - 결정: **need_cmd fzf 배치 규칙** — 인자를 다 줘도 fzf가 필요할 수 있으면 상단 체크
   (klog/kexec/kpf), 인자를 주면 fzf가 확실히 불필요하면 늦은 체크 유지 (kctx/gbr/awsp)
 - 결정: **`.shellcheckrc` 만들지 않음** — disable 규칙이 0개라 설정 파일이 오히려 노이즈.

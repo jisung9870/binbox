@@ -1,4 +1,4 @@
-#compdef kctx kns klog kexec kpf gbr awsp tfsum dx sec tmux-kill-pattern tmux-layout
+#compdef kctx kns klog kexec kpf gbr awsp tfsum dx sec tm
 # binbox 개별 명령어 zsh 완성 — context/namespace/pod/브랜치/profile 등을 동적으로 제안한다.
 # 값이 비싼 목록(sec 서비스명 등 복호화 필요)은 의도적으로 제외.
 
@@ -56,7 +56,7 @@ _binbox_tmux_sessions() {
 
 _binbox_layouts() {
   local -a layouts
-  local dir="${$(command -v tmux-layout 2>/dev/null):A:h}/tmux-layouts"
+  local dir="${$(command -v tm 2>/dev/null):A:h}/tmux-layouts"
   layouts=(${(f)"$(find "$dir" -maxdepth 1 -name '*-layout' -perm -111 2>/dev/null)"})
   layouts=(${${layouts:t}%-layout})
   _describe 'layout' layouts
@@ -139,13 +139,21 @@ _binbox() {
         _describe 'subcommand' subs
       fi
       ;;
-    tmux-kill-pattern)
-      (( CURRENT == 2 )) && _binbox_tmux_sessions
-      ;;
-    tmux-layout)
+    tm)
       if (( CURRENT == 2 )); then
-        _binbox_layouts
+        local -a subs=(
+          'go:프로젝트 선택 → 세션 생성/전환'
+          'attach:세션 선택 또는 새 세션 생성'
+          'layout:레이아웃 선택 후 세션 생성'
+          'kill:세션 제거 (fzf 다중 선택 / 패턴)'
+        )
+        _describe 'subcommand' subs
       elif (( CURRENT == 3 )); then
+        case "${words[2]}" in
+          kill)   _binbox_tmux_sessions ;;
+          layout) _binbox_layouts ;;
+        esac
+      elif (( CURRENT == 4 )) && [[ "${words[2]}" == layout ]]; then
         _files -/
       fi
       ;;
