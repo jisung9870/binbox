@@ -109,13 +109,19 @@ assm                       # awsp로 profile 설정 후 사용
 
 | 명령어 | 설명 |
 |--------|------|
-| `tfplan` | `terraform plan -out=tfplan` (인자 패스스루) |
+| `tfplan` | `terraform plan -out=tfplan` (인자 패스스루, AWS 계정 배너 표시) |
 | `tfsum` | plan 요약 (tree / stree / draw / md / json) |
+| `tfapply` | 세션 기반 `terraform apply` — 계정 확인(뒷 4자리 입력) 후 N분간만 apply 허용 |
 
 ```bash
 tfplan && tfsum tree
 tfsum md plan-summary.md
+tfapply session 15   # 현재 AWS 계정 확인 → 15분 세션 시작
+tfapply              # 세션 유효 + 계정 일치 시에만 terraform apply tfplan
 ```
+
+plan 파일 apply는 terraform의 yes 확인이 생략되므로 `tfapply`가 그 역할을 대신한다.
+세션은 시작 시점의 AWS 계정(STS 기준)에 묶이며, apply 시점에 계정이 다르면 거부한다.
 
 ### 시크릿 — sec
 

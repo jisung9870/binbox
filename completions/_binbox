@@ -1,4 +1,4 @@
-#compdef kctx kns klog kexec kpf gbr awsp tfsum dx sec tm
+#compdef kctx kns klog kexec kpf gbr awsp tfsum tfapply dx sec tm
 # binbox 개별 명령어 zsh 완성 — context/namespace/pod/브랜치/profile 등을 동적으로 제안한다.
 # 값이 비싼 목록(sec 서비스명 등 복호화 필요)은 의도적으로 제외.
 
@@ -112,6 +112,16 @@ _binbox() {
         _describe 'subcommand' subs
       else
         _files
+      fi
+      ;;
+    tfapply)
+      if (( CURRENT == 2 )); then
+        local -a subs=(
+          'session:apply 세션 시작 (계정 확인)'
+          'status:세션 상태'
+          'end:세션 종료'
+        )
+        _describe 'subcommand' subs
       fi
       ;;
     dx)

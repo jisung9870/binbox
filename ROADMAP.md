@@ -93,6 +93,10 @@ binbox 바깥의 설정이 binbox에 의존하는 곳. **명령어 이름을 바
 - [x] `awsp -r` — profile의 region을 `AWS_REGION`으로 동시 export
       (aws CLI 우선, 없으면 ~/.aws/config 파싱)
 - [x] `dx.d` node / python 추가 (npm·pip 캐시 마운트 포함)
+- [x] **`tfapply` — 세션 기반 terraform apply** — plan 파일 apply는 terraform의
+      yes 확인이 생략되는 문제를 래퍼가 대신 해결. STS 기준 identity 배너,
+      Account ID 뒷 4자리 입력으로 세션 시작(기본 15분), apply 시점 계정 재검증.
+      `tfplan`에도 AWS 계정 배너 추가 (soft — 비 AWS 프로젝트는 생략)
 - 결정: **need_cmd fzf 배치 규칙** — 인자를 다 줘도 fzf가 필요할 수 있으면 상단 체크
   (klog/kexec/kpf), 인자를 주면 fzf가 확실히 불필요하면 늦은 체크 유지 (kctx/gbr/awsp)
 - 결정: **`.shellcheckrc` 만들지 않음** — disable 규칙이 0개라 설정 파일이 오히려 노이즈.

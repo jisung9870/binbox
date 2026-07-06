@@ -1,0 +1,135 @@
+#!/usr/bin/env bash
+# tfapply — 세션 기반 terraform apply 래퍼 (AWS 계정 확인 + 시간제한)
+set -euo pipefail
+
+_self=$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || echo "${BASH_SOURCE[0]}")
+BINBOX_DIR=$(cd "$(dirname "$_self")/.." && pwd)
+# shellcheck source=../lib/common.sh
+source "$BINBOX_DIR/lib/common.sh" || { echo "lib/common.sh not found" >&2; exit 1; }
+
+SESSION_FILE="${XDG_STATE_HOME:-$HOME/.local/state}/binbox/tfsession"
+DEFAULT_MINUTES=15
+PLAN_FILE="${TFPLAN_FILE:-tfplan}"
+
+usage() {
+  cat <<'EOF'
+tfapply — 세션 기반 terraform apply (AWS 계정 확인 + 시간제한)
+
+사용법:
+  tfapply session [분]   # apply 세션 시작 — 현재 AWS 계정 확인 후 N분 유효 (기본 15분)
+  tfapply [인자...]      # 세션 유효 시 terraform apply <planfile> (인자 passthrough)
+  tfapply status         # 세션 상태 (유효하면 0, 없음/만료면 1)
+  tfapply end            # 세션 즉시 종료
+
+Planfile:
+  기본값은 ./tfplan. 환경변수 TFPLAN_FILE로 지정 가능. (tfplan/tfsum과 공유)
+
+동작:
+  - plan 파일 apply는 terraform의 yes 확인이 생략되므로 이 래퍼가 그 역할을 대신한다.
+  - 세션은 시작 시점의 AWS 계정(STS 기준)에 묶인다. apply 시점에 계정이 다르면 거부.
+  - 세션 시작 시 Account ID 뒷 4자리를 직접 입력해야 한다 (무의식적 y 연타 방지).
+EOF
+}
+
+# STS 기준 실제 identity 조회 — stdout: "ACCOUNT<TAB>ARN"
+_identity() {
+  aws sts get-caller-identity --output text --query '[Account,Arn]' 2>/dev/null
+}
+
+_show_identity() {
+  local account="$1" arn="$2" region workspace
+  region="${AWS_REGION:-$(aws configure get region 2>/dev/null || true)}"
+  workspace=$(terraform workspace show 2>/dev/null || true)
+  echo "AWS_PROFILE: ${AWS_PROFILE:-(미설정 — default)}"
+  echo "Account:     $account"
+  echo "ARN:         $arn"
+  echo "Region:      ${region:-(미설정)}"
+  if [[ -n "$workspace" ]]; then
+    echo "Workspace:   $workspace"
+  fi
+}
+
+# 유효한 세션이면 session_account/session_left 설정, 아니면 die
+_session_check() {
+  [[ -f "$SESSION_FILE" ]] || die "apply 세션이 없습니다. 먼저 실행하세요: tfapply session"
+  local expires now
+  expires=$(cut -f1 "$SESSION_FILE")
+  session_account=$(cut -f2 "$SESSION_FILE")
+  now=$(date +%s)
+  if (( now >= expires )); then
+    rm -f "$SESSION_FILE"
+    die "apply 세션이 만료되었습니다. 다시 시작하세요: tfapply session"
+  fi
+  session_left=$(( (expires - now + 59) / 60 ))
+}
+
+cmd_session() {
+  need_cmd aws "brew install awscli"
+  local minutes="${1:-$DEFAULT_MINUTES}"
+  [[ "$minutes" =~ ^[0-9]+$ && "$minutes" -ge 1 ]] || die "분은 1 이상의 숫자로 지정하세요: $minutes"
+
+  local ident account arn input
+  ident=$(_identity) ||
+    die "AWS 자격 증명을 확인할 수 없습니다." "profile/SSO 로그인 상태를 확인하세요: eval \"\$(awsp)\""
+  account=$(printf '%s' "$ident" | cut -f1)
+  arn=$(printf '%s' "$ident" | cut -f2)
+
+  echo "apply 세션을 시작합니다:"
+  _show_identity "$account" "$arn"
+  echo
+  read -r -p "계정 확인 — Account ID 뒷 4자리 입력: " input
+  [[ "$input" == "${account: -4}" ]] || die "계정 확인 실패. 세션을 시작하지 않습니다."
+
+  mkdir -p "$(dirname "$SESSION_FILE")"
+  printf '%s\t%s\n' "$(( $(date +%s) + minutes * 60 ))" "$account" >"$SESSION_FILE"
+  echo "✓ 세션 시작됨 — ${minutes}분간 apply 가능 (Account: $account)"
+}
+
+cmd_status() {
+  if [[ ! -f "$SESSION_FILE" ]]; then
+    echo "세션 없음"
+    exit 1
+  fi
+  local expires account now
+  expires=$(cut -f1 "$SESSION_FILE")
+  account=$(cut -f2 "$SESSION_FILE")
+  now=$(date +%s)
+  if (( now >= expires )); then
+    echo "세션 만료됨 (Account: $account)"
+    exit 1
+  fi
+  echo "세션 유효 — 약 $(( (expires - now + 59) / 60 ))분 남음 (Account: $account)"
+}
+
+cmd_apply() {
+  need_cmd terraform "brew install terraform"
+  need_cmd aws "brew install awscli"
+  _session_check
+
+  local ident account arn
+  ident=$(_identity) ||
+    die "AWS 자격 증명을 확인할 수 없습니다." "profile/SSO 로그인 상태를 확인하세요: eval \"\$(awsp)\""
+  account=$(printf '%s' "$ident" | cut -f1)
+  arn=$(printf '%s' "$ident" | cut -f2)
+
+  if [[ "$account" != "$session_account" ]]; then
+    die "세션 계정($session_account)과 현재 계정($account)이 다릅니다." \
+      "profile을 바꿨다면 세션을 다시 시작하세요: tfapply session"
+  fi
+
+  [[ -f "$PLAN_FILE" ]] || die "plan file not found: $PLAN_FILE (run 'tfplan' first)"
+
+  _show_identity "$account" "$arn"
+  echo "세션:        약 ${session_left}분 남음"
+  echo
+  echo "→ terraform apply $PLAN_FILE"
+  exec terraform apply "$@" "$PLAN_FILE"
+}
+
+case "${1:-}" in
+  -h|--help|help) usage; exit 0 ;;
+  session) shift; cmd_session "$@" ;;
+  status)  cmd_status ;;
+  end)     rm -f "$SESSION_FILE"; echo "세션 종료됨" ;;
+  *)       cmd_apply "$@" ;;
+esac
