@@ -17,7 +17,7 @@ jobs:
 
       - name: install test deps (Linux)
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y bats age jq
+        run: sudo apt-get update && sudo apt-get install -y bats age jq zsh
 
       - name: install test deps (macOS)
         if: runner.os == 'macOS'

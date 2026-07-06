@@ -19,7 +19,10 @@ _bb() {
     tools=(${(f)"$(bb list 2>/dev/null)"})
     _describe -t tools 'tool' tools
   else
-    _files
+    # bb <tool> ... → 개별 도구 완성으로 위임 (completions/_binbox 등록 도구는 그 완성 사용)
+    shift words
+    (( CURRENT-- ))
+    _normal
   fi
 }
 

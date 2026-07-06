@@ -10,7 +10,8 @@ git clone https://github.com/<your-username>/binbox.git ~/binbox
 
 # .zshrc에 추가
 echo 'export PATH="$HOME/binbox:$PATH"' >> ~/.zshrc
-echo 'fpath=(~/binbox/completions $fpath)' >> ~/.zshrc   # bb 자동완성, compinit 전에 위치
+echo 'fpath=(~/binbox/completions $fpath)' >> ~/.zshrc   # bb + 개별 명령어 자동완성, compinit 전에 위치
+# 완성이 안 보이면 캐시 재생성: rm -f ~/.zcompdump && exec zsh
 source ~/.zshrc
 
 # 실행 권한 부여 + 의존성 점검

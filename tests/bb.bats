@@ -84,3 +84,11 @@ teardown() {
   [ "$status" -eq 1 ]
   [[ "$output" == *"업데이트 실패"* ]]
 }
+
+@test "completions: zsh syntax is valid" {
+  command -v zsh >/dev/null || skip "zsh not installed"
+  for f in "$BINBOX_DIR"/completions/_*; do
+    run zsh -n "$f"
+    [ "$status" -eq 0 ]
+  done
+}
