@@ -48,9 +48,10 @@ binbox 바깥의 설정이 binbox에 의존하는 곳. **명령어 이름을 바
 
 ### 설정 파일 포맷 공유 (bb와 무관, 포맷 변경 시 주의)
 
-- `~/.config/tmux-sessionizer/dirs` — nvim의 `editor.lua:7`(Telescope 프로젝트 목록)이
-  이 파일을 **직접 파싱**한다 (`#` 주석, `~` 확장 규칙 포함).
+- `~/.config/tmux-sessionizer/dirs` — nvim의 `editor.lua:7`(Snacks projects dev 루트)이
+  이 파일을 **직접 파싱**한다 (`#` 주석, `~` 확장, `=` 직접 등록 prefix 포함).
   `tm`으로 통합한 뒤에도 이 경로/포맷은 그대로 유지한다 (tm go가 계속 읽는다).
+  `=` 문법 추가 시 editor.lua도 함께 수정함 — 포맷을 또 바꾸면 양쪽 동기 수정 필요.
   binbox 쪽에서 파일 위치/포맷을 바꾸면 nvim 쪽은 조용히 폴백으로 빠지므로
   lazyvim-config 저장소와 함께 수정해야 한다.
 
@@ -87,6 +88,9 @@ binbox 바깥의 설정이 binbox에 의존하는 곳. **명령어 이름을 바
       `tm attach`, `tm layout`, `tm kill [패턴]`(구 kill-sessions + kill-pattern 통합).
       설정/상태 경로(`~/.config/tmux-sessionizer/*`)는 nvim 결합 때문에 그대로 유지.
       외부 호출 지점(~/.tmux.conf bind f, nvim terminal.lua)도 `tm`으로 함께 수정
+- [x] **`tm dirs` + 단일 디렉토리 직접 등록** — dirs 파일에 `=경로` 문법 추가
+      (그 디렉토리 자체가 후보), `tm dirs`/`add [-d]`/`rm`/`edit`로 CLI 관리.
+      nvim editor.lua 파서도 `=` 인식하도록 동기 수정
 - 결정: **need_cmd fzf 배치 규칙** — 인자를 다 줘도 fzf가 필요할 수 있으면 상단 체크
   (klog/kexec/kpf), 인자를 주면 fzf가 확실히 불필요하면 늦은 체크 유지 (kctx/gbr/awsp)
 - 결정: **`.shellcheckrc` 만들지 않음** — disable 규칙이 0개라 설정 파일이 오히려 노이즈.

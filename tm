@@ -26,9 +26,15 @@ tm — tmux 세션 관리 통합 명령
   tm layout [이름] [경로]  # 레이아웃 선택 후 세션 생성 (golang, k8s, terraform)
   tm kill                 # fzf 다중 선택으로 세션 삭제
   tm kill <패턴>           # 패턴 매칭 세션 일괄 삭제 (확인 후)
+  tm dirs                 # 프로젝트 디렉토리 목록/상태
+  tm dirs add [-d] [경로]  # 목록에 추가 (기본 $PWD, -d: 그 디렉토리 자체를 후보로)
+  tm dirs rm              # fzf 다중 선택으로 목록에서 제거
+  tm dirs edit            # $EDITOR로 편집
 
 설정:
   프로젝트 목록: ~/.config/tmux-sessionizer/dirs (한 줄에 하나, ~ 사용 가능)
+                 일반 줄 = 부모 디렉토리 (depth-1 자식들이 후보)
+                 =경로   = 그 디렉토리 자체가 후보
   최근 기록:     ~/.local/state/tmux-sessionizer/recent
 EOF
 }
@@ -36,7 +42,14 @@ EOF
 # --- go (구 tmux-sessionizer) ---
 
 _go_read_candidates() {
-  find "${valid_dirs[@]}" -mindepth 1 -maxdepth 1 -type d ! -name '.*' -print 2>/dev/null | sort -u
+  {
+    if [[ ${#valid_direct[@]} -gt 0 ]]; then
+      printf '%s\n' "${valid_direct[@]}"
+    fi
+    if [[ ${#valid_dirs[@]} -gt 0 ]]; then
+      find "${valid_dirs[@]}" -mindepth 1 -maxdepth 1 -type d ! -name '.*' -print 2>/dev/null
+    fi
+  } | sort -u
 }
 
 _go_ordered_candidates() {
@@ -76,29 +89,42 @@ _go_record_recent() {
 }
 
 cmd_go() {
+  PROJECT_DIRS=()
+  DIRECT_DIRS=()
   if [[ -f "$CONFIG_FILE" ]]; then
-    PROJECT_DIRS=()
     while IFS= read -r line; do
       [[ -z "$line" || "$line" == \#* ]] && continue
-      line="${line/#\~/$HOME}"
-      PROJECT_DIRS+=("$line")
+      if [[ "$line" == =* ]]; then
+        line="${line#=}"
+        line="${line/#\~/$HOME}"
+        DIRECT_DIRS+=("$line")
+      else
+        line="${line/#\~/$HOME}"
+        PROJECT_DIRS+=("$line")
+      fi
     done <"$CONFIG_FILE"
   else
     PROJECT_DIRS=("$HOME/home/projects" "$HOME/home/work")
   fi
 
-  if [[ ${#PROJECT_DIRS[@]} -eq 0 ]]; then
+  if [[ ${#PROJECT_DIRS[@]} -eq 0 && ${#DIRECT_DIRS[@]} -eq 0 ]]; then
     die "프로젝트 디렉토리가 설정되어 있지 않습니다: $CONFIG_FILE"
   fi
 
   valid_dirs=()
-  for dir in "${PROJECT_DIRS[@]}"; do
+  for dir in ${PROJECT_DIRS[@]+"${PROJECT_DIRS[@]}"}; do
     if [[ -d "$dir" ]]; then
       valid_dirs+=("$dir")
     fi
   done
+  valid_direct=()
+  for dir in ${DIRECT_DIRS[@]+"${DIRECT_DIRS[@]}"}; do
+    if [[ -d "$dir" ]]; then
+      valid_direct+=("$dir")
+    fi
+  done
 
-  if [[ ${#valid_dirs[@]} -eq 0 ]]; then
+  if [[ ${#valid_dirs[@]} -eq 0 && ${#valid_direct[@]} -eq 0 ]]; then
     die "사용 가능한 프로젝트 디렉토리가 없습니다." "설정 파일을 확인하세요: $CONFIG_FILE"
   fi
 
@@ -269,6 +295,97 @@ cmd_kill() {
   done
 }
 
+# --- dirs (프로젝트 디렉토리 목록 관리) ---
+
+_dirs_expand() {
+  printf '%s' "${1/#\~/$HOME}"
+}
+
+_dirs_list() {
+  [[ -f "$CONFIG_FILE" ]] || die "설정 파일이 없습니다: $CONFIG_FILE" "tm dirs add [경로]로 시작하세요."
+  local line path count
+  while IFS= read -r line; do
+    [[ -z "$line" || "$line" == \#* ]] && continue
+    if [[ "$line" == =* ]]; then
+      path=$(_dirs_expand "${line#=}")
+      if [[ -d "$path" ]]; then
+        printf '직접  %s\n' "$line"
+      else
+        printf '없음! %s (경로 없음)\n' "$line"
+      fi
+    else
+      path=$(_dirs_expand "$line")
+      if [[ -d "$path" ]]; then
+        count=$(find "$path" -mindepth 1 -maxdepth 1 -type d ! -name '.*' -print 2>/dev/null | grep -c . || true)
+        printf '부모  %s (후보 %s개)\n' "$line" "$count"
+      else
+        printf '없음! %s (경로 없음)\n' "$line"
+      fi
+    fi
+  done <"$CONFIG_FILE"
+}
+
+_dirs_add() {
+  local direct=0 path entry
+  if [[ "${1:-}" == "-d" || "${1:-}" == "--direct" ]]; then
+    direct=1
+    shift
+  fi
+  path=$(_dirs_expand "${1:-$PWD}")
+  [[ -d "$path" ]] || die "디렉토리가 없습니다: $path"
+  path=$(cd "$path" && pwd)
+  # $HOME prefix → ~ 축약 (bash 3.2의 치환 백슬래시 처리 차이 때문에 패턴 치환 대신 명시적 제거)
+  if [[ "$path" == "$HOME"/* || "$path" == "$HOME" ]]; then
+    entry="~${path#"$HOME"}"
+  else
+    entry="$path"
+  fi
+  if [[ "$direct" -eq 1 ]]; then
+    entry="=${entry}"
+  fi
+
+  mkdir -p "$(dirname "$CONFIG_FILE")"
+  touch "$CONFIG_FILE"
+  if grep -Fxq "$entry" "$CONFIG_FILE"; then
+    echo "이미 등록되어 있습니다: $entry"
+    return 0
+  fi
+  printf '%s\n' "$entry" >>"$CONFIG_FILE"
+  echo "✓ 추가됨: $entry"
+}
+
+_dirs_rm() {
+  need_cmd fzf "brew install fzf"
+  [[ -f "$CONFIG_FILE" ]] || die "설정 파일이 없습니다: $CONFIG_FILE"
+  local entries selected
+  entries=$(grep -v '^[[:space:]]*$' "$CONFIG_FILE" | grep -v '^#' || true)
+  [[ -n "$entries" ]] || die "등록된 항목이 없습니다: $CONFIG_FILE"
+
+  selected=$(printf '%s\n' "$entries" | fzf_pick --multi --prompt="제거할 항목 선택 (Tab으로 다중 선택): ")
+  if [[ -z "$selected" ]]; then
+    echo "선택 취소"
+    return 0
+  fi
+
+  grep -Fxv -f <(printf '%s\n' "$selected") "$CONFIG_FILE" >"${CONFIG_FILE}.tmp" || true
+  mv "${CONFIG_FILE}.tmp" "$CONFIG_FILE"
+  printf '%s\n' "$selected" | while IFS= read -r line; do
+    echo "✓ 제거됨: $line"
+  done
+}
+
+cmd_dirs() {
+  local dsub="${1:-}"
+  [[ $# -gt 0 ]] && shift || true
+  case "$dsub" in
+    "")   _dirs_list ;;
+    add)  _dirs_add "$@" ;;
+    rm)   _dirs_rm ;;
+    edit) mkdir -p "$(dirname "$CONFIG_FILE")"; exec "${EDITOR:-vi}" "$CONFIG_FILE" ;;
+    *) die "알 수 없는 dirs 서브커맨드: $dsub (add / rm / edit)" ;;
+  esac
+}
+
 sub="${1:-go}"
 [[ $# -gt 0 ]] && shift || true
 
@@ -278,5 +395,6 @@ case "$sub" in
   attach|a) need_cmd tmux "brew install tmux"; need_cmd fzf "brew install fzf"; cmd_attach ;;
   layout)   need_cmd tmux "brew install tmux"; need_cmd fzf "brew install fzf"; cmd_layout "$@" ;;
   kill)     need_cmd tmux "brew install tmux"; cmd_kill "$@" ;;
+  dirs)     cmd_dirs "$@" ;;
   *) usage >&2; die "알 수 없는 서브커맨드: $sub" ;;
 esac

@@ -146,15 +146,28 @@ _binbox() {
           'attach:세션 선택 또는 새 세션 생성'
           'layout:레이아웃 선택 후 세션 생성'
           'kill:세션 제거 (fzf 다중 선택 / 패턴)'
+          'dirs:프로젝트 디렉토리 목록 관리'
         )
         _describe 'subcommand' subs
       elif (( CURRENT == 3 )); then
         case "${words[2]}" in
           kill)   _binbox_tmux_sessions ;;
           layout) _binbox_layouts ;;
+          dirs)
+            local -a dsubs=(
+              'add:목록에 추가 (-d: 직접 등록)'
+              'rm:fzf 다중 선택으로 제거'
+              'edit:$EDITOR로 편집'
+            )
+            _describe 'dirs subcommand' dsubs
+            ;;
         esac
-      elif (( CURRENT == 4 )) && [[ "${words[2]}" == layout ]]; then
-        _files -/
+      elif (( CURRENT == 4 )); then
+        if [[ "${words[2]}" == layout ]]; then
+          _files -/
+        elif [[ "${words[2]}" == dirs && "${words[3]}" == add ]]; then
+          _files -/
+        fi
       fi
       ;;
   esac

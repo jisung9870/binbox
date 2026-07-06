@@ -46,12 +46,15 @@ bb <Tab>          # zsh 자동완성
 | `tm attach` | 기존 세션 선택 또는 새 세션 생성 |
 | `tm layout` | 레이아웃 선택 후 세션 생성 (golang, k8s, terraform) |
 | `tm kill [패턴]` | fzf 다중 선택 / 패턴 매칭으로 세션 삭제 |
+| `tm dirs` | 프로젝트 디렉토리 목록 관리 (add / rm / edit) |
 | `agents` | Claude/Codex tmux pane 상태 조회 및 fzf 점프 |
 
 ```bash
 tm                      # 프로젝트 선택 → 세션 생성
 tm layout my-proj ~/w/p # 레이아웃 선택 → 세션 생성
 tm kill k8s             # k8s 패턴 세션 일괄 삭제
+tm dirs add ~/home/poc  # 부모 디렉토리 등록 (자식들이 후보)
+tm dirs add -d ~/binbox # 단일 디렉토리 직접 등록
 agents                  # agent pane 선택 후 이동 (--list, --usage)
 ```
 
@@ -170,17 +173,23 @@ DOCKER_OPTS=(
 
 ### tm 프로젝트 목록
 
-프로젝트 디렉토리 목록은 설정 파일로 관리한다. 머신별로 파일만 다르게 두면 된다.
-(경로는 구 tmux-sessionizer 시절 그대로 — nvim Telescope가 이 파일을 직접 파싱하므로 유지)
+프로젝트 디렉토리 목록은 `~/.config/tmux-sessionizer/dirs`로 관리한다. 머신별로 파일만
+다르게 두면 된다. (경로는 구 tmux-sessionizer 시절 그대로 — nvim이 이 파일을 직접
+파싱하므로 유지)
 
 ```bash
-mkdir -p ~/.config/tmux-sessionizer
-cat > ~/.config/tmux-sessionizer/dirs << 'EOF'
-~/home/projects
-~/home/work
-~/home/lab
-~/.config
-EOF
+tm dirs                 # 목록/상태 확인 (부모/직접/죽은 경로)
+tm dirs add ~/home/poc  # 부모로 추가 — depth-1 자식들이 후보 (경로 생략 시 $PWD)
+tm dirs add -d ~/binbox # 직접 등록 — 그 디렉토리 자체가 후보
+tm dirs rm              # fzf 다중 선택으로 제거
+tm dirs edit            # $EDITOR로 직접 편집
+```
+
+파일 포맷 (한 줄에 하나, `~` 사용 가능, `#` 주석):
+
+```
+~/home/projects   # 부모 — 자식 디렉토리들이 후보
+=~/binbox         # '=' prefix — 이 디렉토리 자체가 후보
 ```
 
 설정 파일이 없으면 기본 경로(`~/home/projects`, `~/home/work`)를 사용한다.
