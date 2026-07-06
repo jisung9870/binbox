@@ -95,7 +95,11 @@ _binbox() {
         '(-a --all)'{-a,--all}'[원격 브랜치 포함]' \
         '1:브랜치:_binbox_git_branches'
       ;;
-    awsp) _arguments '1:profile:_binbox_aws_profiles' ;;
+    awsp)
+      _arguments \
+        '(-r --region)'{-r,--region}'[profile의 region도 AWS_REGION으로 export]' \
+        '1:profile:_binbox_aws_profiles'
+      ;;
     tfsum)
       if (( CURRENT == 2 )); then
         local -a subs=(

@@ -14,11 +14,6 @@ binbox의 개선 방향과 계획. 완료된 항목은 기록으로 남긴다.
 
 ## 진행 예정
 
-### 중기
-
-- [ ] `awsp`에 region 전환 옵션 검토 (`AWS_REGION` export 동시 출력)
-- [ ] `dx.d` 도구 추가 검토 (node, python 등 필요해지는 시점에)
-
 ### 장기 / 검토
 
 - [ ] `agents`의 Go TUI 전환 검토 — 저장소에서 유일하게 로직이 무거운 도구.
@@ -95,6 +90,9 @@ binbox 바깥의 설정이 binbox에 의존하는 곳. **명령어 이름을 바
 - [x] `tm go` fzf UX — 세션 존재 마커(●), `~` 축약 표시, git 브랜치/최근 커밋 preview.
       후보는 `마커\t표시경로\t실제경로` TSV로 넘기고 `--with-nth=1,2`로 표시만 분리
 - [x] `tm dirs prune` — 존재하지 않는 경로 항목 일괄 정리 (확인 후)
+- [x] `awsp -r` — profile의 region을 `AWS_REGION`으로 동시 export
+      (aws CLI 우선, 없으면 ~/.aws/config 파싱)
+- [x] `dx.d` node / python 추가 (npm·pip 캐시 마운트 포함)
 - 결정: **need_cmd fzf 배치 규칙** — 인자를 다 줘도 fzf가 필요할 수 있으면 상단 체크
   (klog/kexec/kpf), 인자를 주면 fzf가 확실히 불필요하면 늦은 체크 유지 (kctx/gbr/awsp)
 - 결정: **`.shellcheckrc` 만들지 않음** — disable 규칙이 0개라 설정 파일이 오히려 노이즈.

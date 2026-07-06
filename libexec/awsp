@@ -14,17 +14,24 @@ usage() {
 awsp — fzf 기반 AWS_PROFILE 전환
 
 사용법:
-  eval "$(awsp)"            # fzf로 profile 선택
-  eval "$(awsp <profile>)"  # 직접 지정
+  eval "$(awsp)"               # fzf로 profile 선택
+  eval "$(awsp <profile>)"     # 직접 지정
+  eval "$(awsp -r [profile])"  # profile의 region도 AWS_REGION으로 export
 
-설정 (.zshrc):
-  alias awsp='eval "$(command awsp)"'
+설정: aliases.zsh가 awsp() { eval "$(bb awsp "$@")"; } 함수를 제공한다.
 EOF
 }
 
-case "${1:-}" in
-  -h|--help|help) usage; exit 0 ;;
-esac
+with_region=0
+selected=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -h|--help|help) usage; exit 0 ;;
+    -r|--region) with_region=1; shift ;;
+    -*) die "알 수 없는 옵션: $1" ;;
+    *) selected="$1"; shift ;;
+  esac
+done
 
 profiles=""
 if command -v aws >/dev/null 2>&1; then
@@ -39,7 +46,6 @@ fi
 
 [[ -n "$profiles" ]] || die "AWS profile을 찾을 수 없습니다. (~/.aws/config 확인)"
 
-selected="${1:-}"
 if [[ -n "$selected" ]]; then
   printf '%s\n' "$profiles" | grep -Fxq "$selected" || die "존재하지 않는 profile: $selected"
 else
@@ -59,3 +65,20 @@ fi
 
 printf 'export AWS_PROFILE=%q\n' "$selected"
 echo "AWS_PROFILE=${selected}" >&2
+
+# -r: profile에 설정된 region을 AWS_REGION으로 함께 export
+if [[ "$with_region" -eq 1 ]]; then
+  region=""
+  if command -v aws >/dev/null 2>&1; then
+    region=$(aws configure get region --profile "$selected" 2>/dev/null || true)
+  fi
+  if [[ -z "$region" && -f "$HOME/.aws/config" ]]; then
+    region=$(awk -v p="$selected" '
+      /^\[/ { insec = ($0 == "[profile " p "]" || (p == "default" && $0 == "[default]")) }
+      insec && /^[[:space:]]*region[[:space:]]*=/ { sub(/^[^=]*=[[:space:]]*/, ""); print; exit }
+    ' "$HOME/.aws/config")
+  fi
+  [[ -n "$region" ]] || die "profile '$selected'에 region이 설정되어 있지 않습니다."
+  printf 'export AWS_REGION=%q\n' "$region"
+  echo "AWS_REGION=${region}" >&2
+fi

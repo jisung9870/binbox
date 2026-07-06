@@ -79,6 +79,25 @@ teardown() {
   [[ "$output" == *"export AWS_PROFILE=dev"* ]]
 }
 
+@test "awsp -r <profile>: exports AWS_REGION too" {
+  export HOME="$STUB_DIR"
+  mkdir -p "$STUB_DIR/.aws"
+  printf '[profile dev]\nregion = ap-northeast-2\n' > "$STUB_DIR/.aws/config"
+  run env PATH="/usr/bin:/bin" "$BINBOX_DIR/libexec/awsp" -r dev
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"export AWS_PROFILE=dev"* ]]
+  [[ "$output" == *"export AWS_REGION=ap-northeast-2"* ]]
+}
+
+@test "awsp -r: profile without region errors" {
+  export HOME="$STUB_DIR"
+  mkdir -p "$STUB_DIR/.aws"
+  printf '[profile dev]\noutput = json\n' > "$STUB_DIR/.aws/config"
+  run env PATH="/usr/bin:/bin" "$BINBOX_DIR/libexec/awsp" -r dev
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"region이 설정되어 있지 않습니다"* ]]
+}
+
 @test "assm: missing aws cli errors with hint" {
   run env PATH="/usr/bin:/bin" "$BINBOX_DIR/libexec/assm" 2>&1
   [ "$status" -eq 1 ]

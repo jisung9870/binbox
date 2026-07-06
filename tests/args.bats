@@ -85,6 +85,8 @@ esac
   [ "$status" -eq 0 ]
   [[ "$output" == *"ansible"* ]]
   [[ "$output" == *"ubuntu"* ]]
+  [[ "$output" == *"node"* ]]
+  [[ "$output" == *"python"* ]]
 }
 
 @test "dx: unknown tool errors" {
