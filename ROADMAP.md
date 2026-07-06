@@ -92,6 +92,9 @@ binbox 바깥의 설정이 binbox에 의존하는 곳. **명령어 이름을 바
       bb/binbox-check/Makefile/테스트 경로 갱신, 프롤로그는 `dirname/..` 기준으로 변경.
       외부 호출(tmux bind f, agents 팝업, nvim toggleterm)은 `bb <tool>`로 수정
 - [x] `bb new <name>` — 프롤로그/usage/-h 템플릿이 채워진 도구를 libexec/에 생성
+- [x] `tm go` fzf UX — 세션 존재 마커(●), `~` 축약 표시, git 브랜치/최근 커밋 preview.
+      후보는 `마커\t표시경로\t실제경로` TSV로 넘기고 `--with-nth=1,2`로 표시만 분리
+- [x] `tm dirs prune` — 존재하지 않는 경로 항목 일괄 정리 (확인 후)
 - 결정: **need_cmd fzf 배치 규칙** — 인자를 다 줘도 fzf가 필요할 수 있으면 상단 체크
   (klog/kexec/kpf), 인자를 주면 fzf가 확실히 불필요하면 늦은 체크 유지 (kctx/gbr/awsp)
 - 결정: **`.shellcheckrc` 만들지 않음** — disable 규칙이 0개라 설정 파일이 오히려 노이즈.

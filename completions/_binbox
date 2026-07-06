@@ -158,6 +158,7 @@ _binbox() {
             local -a dsubs=(
               'add:목록에 추가 (-d: 직접 등록)'
               'rm:fzf 다중 선택으로 제거'
+              'prune:죽은 경로 일괄 정리'
               'edit:$EDITOR로 편집'
             )
             _describe 'dirs subcommand' dsubs

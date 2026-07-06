@@ -29,6 +29,7 @@ tm — tmux 세션 관리 통합 명령
   tm dirs                 # 프로젝트 디렉토리 목록/상태
   tm dirs add [-d] [경로]  # 목록에 추가 (기본 $PWD, -d: 그 디렉토리 자체를 후보로)
   tm dirs rm              # fzf 다중 선택으로 목록에서 제거
+  tm dirs prune           # 존재하지 않는 경로 항목 일괄 정리 (확인 후)
   tm dirs edit            # $EDITOR로 편집
 
 설정:
@@ -129,16 +130,38 @@ cmd_go() {
   fi
 
   local candidates selected selected_name tmux_running
+  local display_lines line_display marker name existing selected_line cand
   candidates=$(_go_ordered_candidates)
   if [[ -z "$candidates" ]]; then
     die "선택할 프로젝트가 없습니다. 프로젝트 디렉토리에 하위 디렉토리를 추가하세요."
   fi
 
-  selected=$(printf '%s\n' "$candidates" | fzf_pick --prompt="프로젝트 선택: ")
+  # 표시용 TSV 구성: 마커(세션 존재 시 ●) / ~ 축약 경로 / 실제 경로(선택 값)
+  existing=$(tmux list-sessions -F '#{session_name}' 2>/dev/null || true)
+  display_lines=$(printf '%s\n' "$candidates" | while IFS= read -r cand; do
+    if [[ "$cand" == "$HOME"/* ]]; then
+      line_display="~${cand#"$HOME"}"
+    else
+      line_display="$cand"
+    fi
+    name=$(sanitize_session "$(basename "$cand")")
+    marker=" "
+    if [[ -n "$existing" ]] && printf '%s\n' "$existing" | grep -Fxq "$name"; then
+      marker="●"
+    fi
+    printf '%s\t%s\t%s\n' "$marker" "$line_display" "$cand"
+  done)
 
-  if [[ -z "$selected" ]]; then
+  selected_line=$(printf '%s\n' "$display_lines" | fzf_pick \
+    --delimiter=$'\t' --with-nth=1,2 \
+    --prompt="프로젝트 선택: " \
+    --preview='git -C {3} branch --show-current 2>/dev/null; git -C {3} log --oneline -8 2>/dev/null || ls {3}' \
+    --preview-window=right:45%:wrap)
+
+  if [[ -z "$selected_line" ]]; then
     return 0
   fi
+  selected=$(printf '%s' "$selected_line" | cut -f3)
 
   _go_record_recent "$selected"
 
@@ -374,15 +397,44 @@ _dirs_rm() {
   done
 }
 
+_dirs_prune() {
+  [[ -f "$CONFIG_FILE" ]] || die "설정 파일이 없습니다: $CONFIG_FILE"
+  local line path dead=()
+  while IFS= read -r line; do
+    [[ -z "$line" || "$line" == \#* ]] && continue
+    path=$(_dirs_expand "${line#=}")
+    if [[ ! -d "$path" ]]; then
+      dead+=("$line")
+    fi
+  done <"$CONFIG_FILE"
+
+  if [[ ${#dead[@]} -eq 0 ]]; then
+    echo "정리할 항목이 없습니다."
+    return 0
+  fi
+
+  echo "존재하지 않는 경로 항목:"
+  printf '%s\n' "${dead[@]}"
+  if ! confirm "모두 제거할까요?"; then
+    echo "취소됨"
+    return 0
+  fi
+
+  grep -Fxv -f <(printf '%s\n' "${dead[@]}") "$CONFIG_FILE" >"${CONFIG_FILE}.tmp" || true
+  mv "${CONFIG_FILE}.tmp" "$CONFIG_FILE"
+  echo "✓ ${#dead[@]}개 제거됨"
+}
+
 cmd_dirs() {
   local dsub="${1:-}"
   [[ $# -gt 0 ]] && shift || true
   case "$dsub" in
-    "")   _dirs_list ;;
-    add)  _dirs_add "$@" ;;
-    rm)   _dirs_rm ;;
-    edit) mkdir -p "$(dirname "$CONFIG_FILE")"; exec "${EDITOR:-vi}" "$CONFIG_FILE" ;;
-    *) die "알 수 없는 dirs 서브커맨드: $dsub (add / rm / edit)" ;;
+    "")    _dirs_list ;;
+    add)   _dirs_add "$@" ;;
+    rm)    _dirs_rm ;;
+    prune) _dirs_prune ;;
+    edit)  mkdir -p "$(dirname "$CONFIG_FILE")"; exec "${EDITOR:-vi}" "$CONFIG_FILE" ;;
+    *) die "알 수 없는 dirs 서브커맨드: $dsub (add / rm / prune / edit)" ;;
   esac
 }
 

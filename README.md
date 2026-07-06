@@ -185,6 +185,7 @@ tm dirs                 # 목록/상태 확인 (부모/직접/죽은 경로)
 tm dirs add ~/home/poc  # 부모로 추가 — depth-1 자식들이 후보 (경로 생략 시 $PWD)
 tm dirs add -d ~/binbox # 직접 등록 — 그 디렉토리 자체가 후보
 tm dirs rm              # fzf 다중 선택으로 제거
+tm dirs prune           # 존재하지 않는 경로 일괄 정리
 tm dirs edit            # $EDITOR로 직접 편집
 ```
 

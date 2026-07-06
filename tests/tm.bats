@@ -172,8 +172,8 @@ esac
   make_stub pgrep 'exit 1'
   run env -u TMUX "$BINBOX_DIR/libexec/tm" go
   [ "$status" -eq 0 ]
-  grep -Fxq "$STUB_DIR/solo" "$STUB_DIR/fzf.in"
-  grep -Fxq "$STUB_DIR/parent/projA" "$STUB_DIR/fzf.in"
+  cut -f3 "$STUB_DIR/fzf.in" | grep -Fxq "$STUB_DIR/solo"
+  cut -f3 "$STUB_DIR/fzf.in" | grep -Fxq "$STUB_DIR/parent/projA"
   grep -q "new-session -s projA -c $STUB_DIR/parent/projA" "$STUB_DIR/tmux.calls"
 }
 
@@ -185,5 +185,55 @@ esac
   make_stub pgrep 'exit 1'
   run env -u TMUX "$BINBOX_DIR/libexec/tm" go
   [ "$status" -eq 0 ]
-  [ ! -f "$STUB_DIR/tmux.calls" ]
+  ! grep -q 'new-session' "$STUB_DIR/tmux.calls"
+}
+
+@test "tm go: marks projects that already have a session" {
+  mkdir -p "$STUB_DIR/parent/projA" "$STUB_DIR/parent/projB" "$(dirname "$DIRS_FILE")"
+  echo "$STUB_DIR/parent" > "$DIRS_FILE"
+  make_stub tmux "
+if [[ \"\${1:-}\" == list-sessions ]]; then printf 'projA\n'; fi
+"
+  make_stub fzf "tee '$STUB_DIR/fzf.in' >/dev/null; exit 130"
+  make_stub pgrep 'exit 1'
+  run env -u TMUX "$BINBOX_DIR/libexec/tm" go
+  [ "$status" -eq 0 ]
+  grep '^●' "$STUB_DIR/fzf.in" | grep -q projA
+  ! { grep '^●' "$STUB_DIR/fzf.in" | grep -q projB; }
+}
+
+@test "tm go: displays HOME paths abbreviated with tilde" {
+  mkdir -p "$STUB_DIR/home/parent/projA" "$(dirname "$DIRS_FILE")"
+  echo "$STUB_DIR/home/parent" > "$DIRS_FILE"
+  make_stub tmux "printf '%s\n' \"\$*\" >> '$STUB_DIR/tmux.calls'"
+  make_stub fzf "tee '$STUB_DIR/fzf.in' >/dev/null; exit 130"
+  make_stub pgrep 'exit 1'
+  run env -u TMUX HOME="$STUB_DIR/home" "$BINBOX_DIR/libexec/tm" go
+  [ "$status" -eq 0 ]
+  cut -f2 "$STUB_DIR/fzf.in" | grep -Fxq '~/parent/projA'
+}
+
+@test "tm dirs prune: removes dead entries after confirm" {
+  mkdir -p "$STUB_DIR/live" "$(dirname "$DIRS_FILE")"
+  {
+    echo "# comment"
+    echo "$STUB_DIR/live"
+    echo "$STUB_DIR/dead1"
+    echo "=$STUB_DIR/dead2"
+  } > "$DIRS_FILE"
+  run bash -c "printf 'y' | '$BINBOX_DIR/libexec/tm' dirs prune"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"2개 제거됨"* ]]
+  grep -Fxq "$STUB_DIR/live" "$DIRS_FILE"
+  grep -Fxq "# comment" "$DIRS_FILE"
+  ! grep -q dead1 "$DIRS_FILE"
+  ! grep -q dead2 "$DIRS_FILE"
+}
+
+@test "tm dirs prune: nothing to prune exits 0" {
+  mkdir -p "$STUB_DIR/live" "$(dirname "$DIRS_FILE")"
+  echo "$STUB_DIR/live" > "$DIRS_FILE"
+  run "$BINBOX_DIR/libexec/tm" dirs prune
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"정리할 항목이 없습니다"* ]]
 }
