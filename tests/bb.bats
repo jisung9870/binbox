@@ -92,3 +92,33 @@ teardown() {
     [ "$status" -eq 0 ]
   done
 }
+
+@test "bb new: creates executable template that passes -h and shellcheck" {
+  tool="zz-bbnew-test-$$"
+  run "$BINBOX_DIR/bb" new "$tool"
+  [ "$status" -eq 0 ]
+  [ -x "$BINBOX_DIR/libexec/$tool" ]
+  run "$BINBOX_DIR/libexec/$tool" -h
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"사용법"* ]]
+  run "$BINBOX_DIR/bb" list
+  [[ "$output" == *"$tool"* ]]
+  if command -v shellcheck >/dev/null; then
+    run shellcheck -x -P SCRIPTDIR "$BINBOX_DIR/libexec/$tool"
+    [ "$status" -eq 0 ]
+  fi
+  rm -f "$BINBOX_DIR/libexec/$tool"
+}
+
+@test "bb new: rejects existing, reserved, and invalid names" {
+  run "$BINBOX_DIR/bb" new tm
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"이미 존재"* ]]
+  run "$BINBOX_DIR/bb" new list
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"예약어"* ]]
+  run "$BINBOX_DIR/bb" new "Bad_Name"
+  [ "$status" -eq 1 ]
+  run "$BINBOX_DIR/bb" new
+  [ "$status" -eq 1 ]
+}

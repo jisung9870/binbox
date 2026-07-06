@@ -212,16 +212,11 @@ make ci        # check + test
 ```
 
 - GitHub Actions(`.github/workflows/ci.yml`)가 push/PR마다 `make ci`에 해당하는 검사를 실행한다.
-- 새 스크립트는 자동으로 shellcheck 대상에 포함되고 `bb list`에도 자동으로 나타난다.
-- 공통 함수(`die`, `need_cmd`, `fzf_pick`, `confirm`, `sanitize_session`)는 `lib/common.sh`에 있다.
-  새 스크립트는 아래 프롤로그로 source:
-
-```bash
-_self=$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || echo "${BASH_SOURCE[0]}")
-BINBOX_DIR=$(cd "$(dirname "$_self")" && pwd)
-# shellcheck source=lib/common.sh
-source "$BINBOX_DIR/lib/common.sh" || { echo "lib/common.sh not found" >&2; exit 1; }
-```
+- **새 도구는 `bb new <name>`으로 생성한다** — 프롤로그(lib/common.sh source)/usage/`-h`
+  케이스가 채워진 템플릿이 `libexec/<name>`에 만들어지고, shellcheck·`bb list`·zsh 완성·
+  alias에 자동 반영된다.
+- 공통 함수(`die`, `need_cmd`, `fzf_pick`, `confirm`, `sanitize_session`)는 `lib/common.sh`,
+  k8s 헬퍼(`k8s_pick_pod`, `k8s_pick_container`)는 `lib/k8s.sh`에 있다.
 
 향후 계획은 [ROADMAP.md](ROADMAP.md) 참고.
 

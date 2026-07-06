@@ -19,6 +19,7 @@ bb — binbox 통합 진입점
   bb help [tool]        전체/도구별 도움말
   bb doctor             의존성 점검 (= binbox-doctor)
   bb check              shellcheck 일괄 실행 (= binbox-check)
+  bb new <name>         템플릿이 채워진 새 도구 생성 (libexec/<name>)
   bb upgrade            binbox 업데이트 (git pull)
 
 zsh 자동완성: .zshrc에 fpath=(~/binbox/completions $fpath) 추가 (compinit 전)
@@ -96,6 +97,45 @@ case "${1:-}" in
     fi
     tool=$(resolve_tool "$2")
     exec "$BINBOX_DIR/libexec/$tool" -h
+    ;;
+  new)
+    [[ -n "${2:-}" ]] || die "사용법: bb new <name>"
+    new_tool="$2"
+    [[ "$new_tool" =~ ^[a-z][a-z0-9-]*$ ]] || die "도구 이름은 소문자로 시작, 소문자/숫자/하이픈만 가능합니다: $new_tool"
+    case "$new_tool" in
+      list|help|doctor|check|upgrade|new) die "bb 예약어라 사용할 수 없습니다: $new_tool" ;;
+    esac
+    target="$BINBOX_DIR/libexec/$new_tool"
+    [[ -e "$target" ]] && die "이미 존재합니다: $target"
+    cat >"$target" <<TEMPLATE
+#!/usr/bin/env bash
+# ${new_tool} — TODO: 한 줄 설명
+set -euo pipefail
+
+_self=\$(readlink -f "\${BASH_SOURCE[0]}" 2>/dev/null || echo "\${BASH_SOURCE[0]}")
+BINBOX_DIR=\$(cd "\$(dirname "\$_self")/.." && pwd)
+# shellcheck source=../lib/common.sh
+source "\$BINBOX_DIR/lib/common.sh" || { echo "lib/common.sh not found" >&2; exit 1; }
+
+usage() {
+  cat <<'EOF'
+${new_tool} — TODO: 설명
+
+사용법:
+  ${new_tool} [옵션]
+EOF
+}
+
+case "\${1:-}" in
+  -h|--help|help) usage; exit 0 ;;
+esac
+
+die "TODO: 구현"
+TEMPLATE
+    chmod +x "$target"
+    echo "✓ 생성됨: $target"
+    echo "  bb list / shellcheck / zsh 완성에 자동 반영됩니다. (alias는 새 셸부터)"
+    exit 0
     ;;
   upgrade)
     do_upgrade
