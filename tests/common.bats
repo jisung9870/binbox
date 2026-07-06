@@ -57,6 +57,16 @@ teardown() {
   [ "$output" = "picked-item" ]
 }
 
+@test "confirm: y returns 0" {
+  run bash -c "source '$BINBOX_DIR/lib/common.sh'; printf 'y' | confirm '계속?' 2>/dev/null"
+  [ "$status" -eq 0 ]
+}
+
+@test "confirm: n returns 1" {
+  run bash -c "source '$BINBOX_DIR/lib/common.sh'; printf 'n' | confirm '계속?' 2>/dev/null"
+  [ "$status" -eq 1 ]
+}
+
 @test "common.sh: double-source guard works" {
   run bash -c "source '$BINBOX_DIR/lib/common.sh'; source '$BINBOX_DIR/lib/common.sh'; echo ok"
   [ "$status" -eq 0 ]
