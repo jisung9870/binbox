@@ -43,7 +43,7 @@ stub_fzf_cancel() {
 @test "klog <pod>: single container follows logs without fzf selection" {
   stub_kubectl "app"
   stub_fzf_pick_first
-  run "$BINBOX_DIR/klog" my-pod
+  run "$BINBOX_DIR/libexec/klog" my-pod
   [ "$status" -eq 0 ]
   grep -q 'logs -f --tail=200 my-pod' "$STUB_DIR/kubectl.calls"
 }
@@ -51,7 +51,7 @@ stub_fzf_cancel() {
 @test "klog -n <ns> <pod>: passes namespace to every kubectl call" {
   stub_kubectl "app"
   stub_fzf_pick_first
-  run "$BINBOX_DIR/klog" -n myns my-pod
+  run "$BINBOX_DIR/libexec/klog" -n myns my-pod
   [ "$status" -eq 0 ]
   grep -q 'get pod my-pod -n myns' "$STUB_DIR/kubectl.calls"
   grep -q 'logs -f --tail=200 -n myns my-pod' "$STUB_DIR/kubectl.calls"
@@ -60,7 +60,7 @@ stub_fzf_cancel() {
 @test "klog --tail <N>: overrides tail count" {
   stub_kubectl "app"
   stub_fzf_pick_first
-  run "$BINBOX_DIR/klog" --tail 500 my-pod
+  run "$BINBOX_DIR/libexec/klog" --tail 500 my-pod
   [ "$status" -eq 0 ]
   grep -q 'logs -f --tail=500 my-pod' "$STUB_DIR/kubectl.calls"
 }
@@ -68,7 +68,7 @@ stub_fzf_cancel() {
 @test "klog: no args picks pod via fzf then follows logs" {
   stub_kubectl "app"
   stub_fzf_pick_first
-  run "$BINBOX_DIR/klog"
+  run "$BINBOX_DIR/libexec/klog"
   [ "$status" -eq 0 ]
   grep -q 'get pods --no-headers' "$STUB_DIR/kubectl.calls"
   grep -q 'logs -f --tail=200 pod-a' "$STUB_DIR/kubectl.calls"
@@ -77,7 +77,7 @@ stub_fzf_cancel() {
 @test "klog: cancel at pod selection exits 0 without logs call" {
   stub_kubectl "app"
   stub_fzf_cancel
-  run "$BINBOX_DIR/klog"
+  run "$BINBOX_DIR/libexec/klog"
   [ "$status" -eq 0 ]
   ! grep -q '^logs' "$STUB_DIR/kubectl.calls"
 }
@@ -85,7 +85,7 @@ stub_fzf_cancel() {
 @test "klog <pod>: multi-container picks container via fzf" {
   stub_kubectl "app sidecar"
   stub_fzf_pick_first
-  run "$BINBOX_DIR/klog" my-pod
+  run "$BINBOX_DIR/libexec/klog" my-pod
   [ "$status" -eq 0 ]
   grep -q 'logs -f --tail=200 my-pod -c app' "$STUB_DIR/kubectl.calls"
 }
@@ -95,7 +95,7 @@ stub_fzf_cancel() {
 @test "kexec <pod>: single container execs shell" {
   stub_kubectl "app"
   stub_fzf_pick_first
-  run "$BINBOX_DIR/kexec" my-pod
+  run "$BINBOX_DIR/libexec/kexec" my-pod
   [ "$status" -eq 0 ]
   grep -q 'exec -it my-pod' "$STUB_DIR/kubectl.calls"
 }
@@ -103,7 +103,7 @@ stub_fzf_cancel() {
 @test "kexec <pod>: multi-container passes -c with picked container" {
   stub_kubectl "app sidecar"
   stub_fzf_pick_first
-  run "$BINBOX_DIR/kexec" my-pod
+  run "$BINBOX_DIR/libexec/kexec" my-pod
   [ "$status" -eq 0 ]
   grep -q 'exec -it my-pod -c app' "$STUB_DIR/kubectl.calls"
 }
@@ -111,7 +111,7 @@ stub_fzf_cancel() {
 @test "kexec <pod>: cancel at container selection exits 0 without exec call" {
   stub_kubectl "app sidecar"
   stub_fzf_cancel
-  run "$BINBOX_DIR/kexec" my-pod
+  run "$BINBOX_DIR/libexec/kexec" my-pod
   [ "$status" -eq 0 ]
   ! grep -q '^exec' "$STUB_DIR/kubectl.calls"
 }
@@ -121,7 +121,7 @@ stub_fzf_cancel() {
 @test "kpf <pod> <local:remote>: forwards given ports" {
   stub_kubectl "app"
   stub_fzf_pick_first
-  run "$BINBOX_DIR/kpf" my-pod 9000:8080
+  run "$BINBOX_DIR/libexec/kpf" my-pod 9000:8080
   [ "$status" -eq 0 ]
   [[ "$output" == *"localhost:9000"* ]]
   grep -q 'port-forward my-pod 9000:8080' "$STUB_DIR/kubectl.calls"
@@ -130,7 +130,7 @@ stub_fzf_cancel() {
 @test "kpf <pod> <port>: expands single port to local:remote" {
   stub_kubectl "app"
   stub_fzf_pick_first
-  run "$BINBOX_DIR/kpf" my-pod 8080
+  run "$BINBOX_DIR/libexec/kpf" my-pod 8080
   [ "$status" -eq 0 ]
   grep -q 'port-forward my-pod 8080:8080' "$STUB_DIR/kubectl.calls"
 }
@@ -138,7 +138,7 @@ stub_fzf_cancel() {
 @test "kpf <pod>: auto-detects single declared containerPort" {
   stub_kubectl "app" "8080"
   stub_fzf_pick_first
-  run "$BINBOX_DIR/kpf" my-pod
+  run "$BINBOX_DIR/libexec/kpf" my-pod
   [ "$status" -eq 0 ]
   grep -q 'port-forward my-pod 8080:8080' "$STUB_DIR/kubectl.calls"
 }
@@ -146,7 +146,7 @@ stub_fzf_cancel() {
 @test "kpf <pod>: multiple declared ports picks one via fzf" {
   stub_kubectl "app" "8080 9090"
   stub_fzf_pick_first
-  run "$BINBOX_DIR/kpf" my-pod
+  run "$BINBOX_DIR/libexec/kpf" my-pod
   [ "$status" -eq 0 ]
   grep -q 'port-forward my-pod 8080:8080' "$STUB_DIR/kubectl.calls"
 }

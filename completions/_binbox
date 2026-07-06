@@ -56,7 +56,8 @@ _binbox_tmux_sessions() {
 
 _binbox_layouts() {
   local -a layouts
-  local dir="${$(command -v tm 2>/dev/null):A:h}/tmux-layouts"
+  # 도구가 libexec에 있어 PATH에는 bb만 노출 — bb 위치에서 레이아웃 디렉토리를 찾는다
+  local dir="${$(command -v bb 2>/dev/null):A:h}/tmux-layouts"
   layouts=(${(f)"$(find "$dir" -maxdepth 1 -name '*-layout' -perm -111 2>/dev/null)"})
   layouts=(${${layouts:t}%-layout})
   _describe 'layout' layouts
@@ -64,7 +65,7 @@ _binbox_layouts() {
 
 _binbox_dx_tools() {
   local -a tools
-  tools=(${(f)"$(dx --list 2>/dev/null)"})
+  tools=(${(f)"$(bb dx --list 2>/dev/null)"})
   _describe 'tool' tools
 }
 

@@ -11,6 +11,7 @@ git clone https://github.com/<your-username>/binbox.git ~/binbox
 # .zshrc에 추가
 echo 'export PATH="$HOME/binbox:$PATH"' >> ~/.zshrc
 echo 'fpath=(~/binbox/completions $fpath)' >> ~/.zshrc   # bb + 개별 명령어 자동완성, compinit 전에 위치
+echo 'source ~/binbox/aliases.zsh' >> ~/.zshrc            # 개별 명령(tm, kctx 등) alias 복원
 # 완성이 안 보이면 캐시 재생성: rm -f ~/.zcompdump && exec zsh
 source ~/.zshrc
 
@@ -23,7 +24,9 @@ bb upgrade
 
 ## bb — 통합 진입점
 
-모든 도구를 하나의 명령어로 실행할 수 있다. 기존 개별 명령어도 그대로 동작한다.
+도구 실체는 `libexec/`에 있고 **PATH에는 `bb` 하나만 노출된다** (이름 충돌·PATH 오염 방지).
+개별 명령어(`tm`, `kctx` 등)는 `aliases.zsh`를 source하면 alias로 복원되어 기존처럼 쓸 수 있다.
+tmux/nvim 등 비인터랙티브 환경에서는 alias가 없으므로 `bb tm`처럼 호출한다.
 
 ```bash
 bb                # 사용법 + 도구 목록

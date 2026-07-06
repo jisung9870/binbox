@@ -4,8 +4,8 @@
 set -euo pipefail
 
 _self=$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || echo "${BASH_SOURCE[0]}")
-BINBOX_DIR=$(cd "$(dirname "$_self")" && pwd)
-# shellcheck source=lib/common.sh
+BINBOX_DIR=$(cd "$(dirname "$_self")/.." && pwd)
+# shellcheck source=../lib/common.sh
 source "$BINBOX_DIR/lib/common.sh" || { echo "lib/common.sh not found" >&2; exit 1; }
 
 # 설정/상태 경로는 구 tmux-sessionizer 시절 그대로 유지 —

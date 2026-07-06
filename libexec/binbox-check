@@ -2,6 +2,7 @@
 set -euo pipefail
 
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
+ROOT_DIR=$(cd "$SCRIPT_DIR/.." && pwd)
 
 command -v shellcheck >/dev/null || {
   echo "shellcheck not found in PATH" >&2
@@ -9,12 +10,12 @@ command -v shellcheck >/dev/null || {
   exit 1
 }
 
-# bash shebang을 가진 최상위 스크립트 + tmux-layouts + lib 자동 탐색
+# bash shebang을 가진 스크립트 자동 탐색: 루트(bb) + libexec + tmux-layouts + lib
 targets=()
 while IFS= read -r file; do
   head -1 "$file" 2>/dev/null | grep -q '^#!/usr/bin/env bash' || continue
   targets+=("$file")
-done < <(find "$SCRIPT_DIR" "$SCRIPT_DIR/tmux-layouts" "$SCRIPT_DIR/lib" \
+done < <(find "$ROOT_DIR" "$ROOT_DIR/libexec" "$ROOT_DIR/tmux-layouts" "$ROOT_DIR/lib" \
   -maxdepth 1 -type f -print 2>/dev/null | sort -u)
 
 if [[ ${#targets[@]} -eq 0 ]]; then
@@ -31,7 +32,7 @@ shellcheck -x -P SCRIPTDIR "${targets[@]}"
 dxd_files=()
 while IFS= read -r file; do
   dxd_files+=("$file")
-done < <(find "$SCRIPT_DIR/dx.d" -maxdepth 1 -type f -print 2>/dev/null | sort)
+done < <(find "$ROOT_DIR/dx.d" -maxdepth 1 -type f -print 2>/dev/null | sort)
 
 if [[ ${#dxd_files[@]} -gt 0 ]]; then
   shellcheck -s bash "${dxd_files[@]}"

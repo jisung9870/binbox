@@ -21,31 +21,31 @@ teardown() {
 }
 
 @test "tfsum -h: prints usage and exits 0" {
-  run "$BINBOX_DIR/tfsum" -h
+  run "$BINBOX_DIR/libexec/tfsum" -h
   [ "$status" -eq 0 ]
   [[ "$output" == *"tf-summarize wrapper"* ]]
 }
 
 @test "tfsum: unknown subcommand exits 2" {
-  run "$BINBOX_DIR/tfsum" badcmd
+  run "$BINBOX_DIR/libexec/tfsum" badcmd
   [ "$status" -eq 2 ]
   [[ "$output" == *"unknown subcommand"* ]]
 }
 
 @test "tfsum: default summary runs tf-summarize with no flags" {
-  run "$BINBOX_DIR/tfsum"
+  run "$BINBOX_DIR/libexec/tfsum"
   [ "$status" -eq 0 ]
   [ ! -s "$STUB_DIR/tf-summarize.args" ]
 }
 
 @test "tfsum tree: passes -tree flag" {
-  run "$BINBOX_DIR/tfsum" tree
+  run "$BINBOX_DIR/libexec/tfsum" tree
   [ "$status" -eq 0 ]
   grep -qx -- "-tree" "$STUB_DIR/tf-summarize.args"
 }
 
 @test "tfsum md outfile: passes -md and -out" {
-  run "$BINBOX_DIR/tfsum" md summary.md
+  run "$BINBOX_DIR/libexec/tfsum" md summary.md
   [ "$status" -eq 0 ]
   grep -qx -- "-md" "$STUB_DIR/tf-summarize.args"
   grep -qx -- "-out=summary.md" "$STUB_DIR/tf-summarize.args"
@@ -53,27 +53,27 @@ teardown() {
 
 @test "tfsum md outfile planfile: uses given plan file" {
   touch other.tfplan
-  run "$BINBOX_DIR/tfsum" md summary.md other.tfplan
+  run "$BINBOX_DIR/libexec/tfsum" md summary.md other.tfplan
   [ "$status" -eq 0 ]
   grep -qx -- "other.tfplan" "$STUB_DIR/terraform.args"
 }
 
 @test "tfsum md a b c: extra args exit 2" {
-  run "$BINBOX_DIR/tfsum" md a b c
+  run "$BINBOX_DIR/libexec/tfsum" md a b c
   [ "$status" -eq 2 ]
   [[ "$output" == *"unexpected argument"* ]]
 }
 
 @test "tfsum: missing plan file errors" {
   rm tfplan
-  run "$BINBOX_DIR/tfsum" tree
+  run "$BINBOX_DIR/libexec/tfsum" tree
   [ "$status" -eq 1 ]
   [[ "$output" == *"plan file not found"* ]]
 }
 
 @test "tfsum: respects TFPLAN_FILE env var" {
   touch qa.tfplan
-  run env TFPLAN_FILE=qa.tfplan "$BINBOX_DIR/tfsum" tree
+  run env TFPLAN_FILE=qa.tfplan "$BINBOX_DIR/libexec/tfsum" tree
   [ "$status" -eq 0 ]
   grep -qx -- "qa.tfplan" "$STUB_DIR/terraform.args"
 }

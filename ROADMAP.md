@@ -16,13 +16,6 @@ binbox의 개선 방향과 계획. 완료된 항목은 기록으로 남긴다.
 
 ### 중기
 
-- [ ] **bb 일원화 — 개별 명령어 PATH 제거 검토** (아래 "외부 결합 지점" 선행 조치 필수)
-  - 스크립트를 `libexec/` 하위로 이동해 PATH에서 숨기고 `bb`만 노출
-  - 선행 조치: 외부 설정에서 개별 명령어를 직접 호출하는 곳을 먼저 수정
-    - `~/.config/nvim/lua/plugins/terminal.lua:58` — toggleterm `<leader>tp`의 `cmd = "tm"` → `bb tm`
-    - `~/.tmux.conf:160` — `bind f run-shell "tmux neww tm"` → `bb tm`
-  - `bb list`/`resolve_tool`/`binbox-check`/`make install`의 탐색 경로를 `libexec/`로 변경
-  - 자주 쓰는 명령은 `.zshrc` alias로 복원 가능 (예: `alias kctx='bb kctx'`)
 - [ ] `bb new <name>` — 프롤로그/usage 템플릿이 채워진 새 스크립트 생성
 - [ ] `awsp`에 region 전환 옵션 검토 (`AWS_REGION` export 동시 출력)
 - [ ] `dx.d` 도구 추가 검토 (node, python 등 필요해지는 시점에)
@@ -39,12 +32,16 @@ binbox의 개선 방향과 계획. 완료된 항목은 기록으로 남긴다.
 binbox 바깥의 설정이 binbox에 의존하는 곳. **명령어 이름을 바꾸거나 PATH에서 제거하기 전에
 반드시 여기를 먼저 확인한다.** (2026-07 조사 기준)
 
-### 개별 명령어 이름으로 직접 호출 (일원화 시 깨짐)
+### bb 경유 호출 (일원화 완료 후 — bb만 PATH에 있으면 됨)
 
 | 위치 | 내용 |
 |------|------|
-| `~/.config/nvim/lua/plugins/terminal.lua:58` | toggleterm `<leader>tp`가 `tm` 실행 |
-| `~/.tmux.conf:160` | `bind f run-shell "tmux neww tm"` |
+| `~/.config/nvim/lua/plugins/terminal.lua:58` | toggleterm `<leader>tp`가 `bb tm` 실행 |
+| `~/.tmux.conf:160` | `bind f run-shell "tmux neww 'bb tm'"` |
+| `~/.tmux.conf:163` | agents 팝업 — `if-shell "command -v bb"` + `bb agents` |
+
+비인터랙티브 셸(tmux run-shell, nvim toggleterm)은 aliases.zsh를 읽지 않으므로
+**반드시 `bb <tool>` 형태로 호출**해야 한다.
 
 ### 설정 파일 포맷 공유 (bb와 무관, 포맷 변경 시 주의)
 
@@ -91,6 +88,10 @@ binbox 바깥의 설정이 binbox에 의존하는 곳. **명령어 이름을 바
 - [x] **`tm dirs` + 단일 디렉토리 직접 등록** — dirs 파일에 `=경로` 문법 추가
       (그 디렉토리 자체가 후보), `tm dirs`/`add [-d]`/`rm`/`edit`로 CLI 관리.
       nvim editor.lua 파서도 `=` 인식하도록 동기 수정
+- [x] **bb 일원화 완료** — 도구 20개를 `libexec/`로 이동, PATH에는 `bb`만 노출.
+      개별 명령은 `aliases.zsh`(libexec 자동 스캔, awsp는 eval 래핑 함수)로 복원.
+      bb/binbox-check/Makefile/테스트 경로 갱신, 프롤로그는 `dirname/..` 기준으로 변경.
+      외부 호출(tmux bind f, agents 팝업, nvim toggleterm)은 `bb <tool>`로 수정
 - 결정: **need_cmd fzf 배치 규칙** — 인자를 다 줘도 fzf가 필요할 수 있으면 상단 체크
   (klog/kexec/kpf), 인자를 주면 fzf가 확실히 불필요하면 늦은 체크 유지 (kctx/gbr/awsp)
 - 결정: **`.shellcheckrc` 만들지 않음** — disable 규칙이 0개라 설정 파일이 오히려 노이즈.

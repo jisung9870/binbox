@@ -1,42 +1,35 @@
 #!/usr/bin/env bash
-# klog — fzf로 pod 선택 후 로그 팔로우
+# kexec — fzf로 pod 선택 후 셸 접속
 set -euo pipefail
 
 _self=$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || echo "${BASH_SOURCE[0]}")
-BINBOX_DIR=$(cd "$(dirname "$_self")" && pwd)
-# shellcheck source=lib/common.sh
+BINBOX_DIR=$(cd "$(dirname "$_self")/.." && pwd)
+# shellcheck source=../lib/common.sh
 source "$BINBOX_DIR/lib/common.sh" || { echo "lib/common.sh not found" >&2; exit 1; }
-# shellcheck source=lib/k8s.sh
+# shellcheck source=../lib/k8s.sh
 source "$BINBOX_DIR/lib/k8s.sh" || { echo "lib/k8s.sh not found" >&2; exit 1; }
 
 usage() {
   cat <<'EOF'
-klog — fzf로 pod 선택 후 kubectl logs -f
+kexec — fzf로 pod 선택 후 셸 접속 (bash 없으면 sh)
 
 사용법:
-  klog [-n <namespace>] [--tail <N>] [pod이름]
-
-옵션:
-  -n <namespace>   대상 namespace (기본: 현재 namespace)
-  --tail <N>       마지막 N줄부터 (기본: 200)
+  kexec [-n <namespace>] [pod이름]
 
 예시:
-  klog
-  klog -n monitoring
-  klog my-pod-abc123
+  kexec
+  kexec -n monitoring
+  kexec my-pod-abc123
 EOF
 }
 
 namespace=""
-tail_n=200
 pod=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     -h|--help|help) usage; exit 0 ;;
     -n) [[ -n "${2:-}" ]] || die "-n 뒤에 namespace를 지정하세요."
         namespace="$2"; shift 2 ;;
-    --tail) [[ "${2:-}" =~ ^[0-9]+$ ]] || die "--tail 뒤에 숫자를 지정하세요."
-        tail_n="$2"; shift 2 ;;
     -*) die "알 수 없는 옵션: $1" ;;
     *) pod="$1"; shift ;;
   esac
@@ -59,4 +52,5 @@ fi
 ns_args=()
 if [[ -n "$namespace" ]]; then ns_args=(-n "$namespace"); fi
 
-exec kubectl logs -f --tail="$tail_n" ${ns_args[@]+"${ns_args[@]}"} "$pod" ${container_args[@]+"${container_args[@]}"}
+exec kubectl exec -it ${ns_args[@]+"${ns_args[@]}"} "$pod" ${container_args[@]+"${container_args[@]}"} \
+  -- sh -c 'exec bash 2>/dev/null || exec sh'

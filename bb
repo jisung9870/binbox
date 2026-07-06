@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # bb — binbox 통합 진입점 (busybox 스타일 디스패처)
-# 기존 개별 명령어는 그대로 유지되며 bb는 추가 진입점이다.
+# 도구 실체는 libexec/에 있고 PATH에는 bb만 노출된다.
+# 개별 명령어는 aliases.zsh를 source하면 alias로 복원된다.
 set -euo pipefail
 
 _self=$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || echo "${BASH_SOURCE[0]}")
@@ -21,6 +22,7 @@ bb — binbox 통합 진입점
   bb upgrade            binbox 업데이트 (git pull)
 
 zsh 자동완성: .zshrc에 fpath=(~/binbox/completions $fpath) 추가 (compinit 전)
+개별 명령 복원: .zshrc에 source ~/binbox/aliases.zsh 추가 (tm, kctx 등 alias)
 EOF
 }
 
@@ -30,9 +32,8 @@ list_tools() {
     head -1 "$file" 2>/dev/null | grep -q '^#!/usr/bin/env bash' || continue
     [[ -x "$file" ]] || continue
     name=$(basename "$file")
-    [[ "$name" == "bb" ]] && continue
     printf '%s\n' "$name"
-  done < <(find "$BINBOX_DIR" -maxdepth 1 -type f -print 2>/dev/null | sort)
+  done < <(find "$BINBOX_DIR/libexec" -maxdepth 1 -type f -print 2>/dev/null | sort)
 }
 
 resolve_tool() {
@@ -43,8 +44,8 @@ resolve_tool() {
     check) tool="binbox-check" ;;
   esac
   [[ "$tool" == */* ]] && die "올바르지 않은 도구 이름: $tool"
-  if [[ ! -x "$BINBOX_DIR/$tool" ]] ||
-    ! head -1 "$BINBOX_DIR/$tool" 2>/dev/null | grep -q '^#!/usr/bin/env bash'; then
+  if [[ ! -x "$BINBOX_DIR/libexec/$tool" ]] ||
+    ! head -1 "$BINBOX_DIR/libexec/$tool" 2>/dev/null | grep -q '^#!/usr/bin/env bash'; then
     {
       echo "알 수 없는 도구: $tool"
       echo
@@ -94,7 +95,7 @@ case "${1:-}" in
       exit 0
     fi
     tool=$(resolve_tool "$2")
-    exec "$BINBOX_DIR/$tool" -h
+    exec "$BINBOX_DIR/libexec/$tool" -h
     ;;
   upgrade)
     do_upgrade
@@ -104,6 +105,6 @@ case "${1:-}" in
     tool=$(resolve_tool "$1")
     shift
     # exec: TTY/fzf 인터랙티브, 종료코드, eval "$(bb awsp)" 모두 보존
-    exec "$BINBOX_DIR/$tool" "$@"
+    exec "$BINBOX_DIR/libexec/$tool" "$@"
     ;;
 esac
