@@ -23,7 +23,7 @@ EOF
 }
 
 case "${1:-}" in
-  -h|--help|help) usage >&2; exit 0 ;;
+  -h|--help|help) usage; exit 0 ;;
 esac
 
 profiles=""

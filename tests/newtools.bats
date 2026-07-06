@@ -55,6 +55,12 @@ teardown() {
   [ "$status" -eq 1 ]
 }
 
+@test "awsp -h: prints usage to stdout" {
+  run bash -c "'$BINBOX_DIR/awsp' -h 2>/dev/null"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"사용법"* ]]
+}
+
 @test "awsp <profile>: nonexistent profile errors" {
   export HOME="$STUB_DIR"
   mkdir -p "$STUB_DIR/.aws"
