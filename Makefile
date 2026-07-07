@@ -12,10 +12,6 @@ test:
 
 install:
 	chmod +x ./bb
-	find ./libexec ./tmux-layouts -maxdepth 1 -type f -exec chmod +x {} \;
-	@echo
-	@echo '.zshrc에 추가하세요:'
-	@echo '  export PATH="$(CURDIR):$$PATH"'
-	@echo '  source $(CURDIR)/aliases.zsh   # 개별 명령(tm, kctx 등) alias 복원'
+	./bb setup
 
 ci: check test

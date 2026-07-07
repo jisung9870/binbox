@@ -38,4 +38,14 @@ if [[ ${#dxd_files[@]} -gt 0 ]]; then
   shellcheck -s bash "${dxd_files[@]}"
 fi
 
-echo "shellcheck passed ($((${#targets[@]} + ${#dxd_files[@]})) files)"
+# shell/ 초기화 파일 (shebang 없음, rc가 source) — *.bash만 검사 (shellcheck은 zsh 미지원)
+shell_files=()
+while IFS= read -r file; do
+  shell_files+=("$file")
+done < <(find "$ROOT_DIR/shell" -maxdepth 1 -type f -name '*.bash' -print 2>/dev/null | sort)
+
+if [[ ${#shell_files[@]} -gt 0 ]]; then
+  shellcheck -s bash "${shell_files[@]}"
+fi
+
+echo "shellcheck passed ($((${#targets[@]} + ${#dxd_files[@]} + ${#shell_files[@]})) files)"

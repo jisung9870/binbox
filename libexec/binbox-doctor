@@ -3,6 +3,11 @@ set -euo pipefail
 
 core_missing=0
 optional_missing=0
+OS=$(uname -s)
+
+pkg_hint() { # pkg_hint <macOS 힌트> <Linux/WSL 힌트>
+  if [[ "$OS" == Darwin ]]; then printf '%s' "$1"; else printf '%s' "$2"; fi
+}
 
 check_cmd() {
   local name="$1" scope="$2" hint="${3:-}"
@@ -26,23 +31,23 @@ check_cmd() {
 echo "binbox doctor"
 echo
 echo "Core tools"
-check_cmd docker "core: dx container runner" "brew install --cask docker"
-check_cmd tmux "core: tmux helpers" "brew install tmux"
-check_cmd fzf "core: interactive selectors" "brew install fzf"
-check_cmd git "core: gbr/glog/gitroot" "brew install git"
-check_cmd lsof "core: portcheck" "usually preinstalled on macOS"
+check_cmd docker "core: dx container runner" "$(pkg_hint 'brew install --cask docker' 'Docker Desktop WSL integration 또는 sudo apt install docker.io')"
+check_cmd tmux "core: tmux helpers" "$(pkg_hint 'brew install tmux' 'sudo apt install tmux')"
+check_cmd fzf "core: interactive selectors" "$(pkg_hint 'brew install fzf' 'sudo apt install fzf')"
+check_cmd git "core: gbr/glog/gitroot" "$(pkg_hint 'brew install git' 'sudo apt install git')"
+check_cmd lsof "core: portcheck" "$(pkg_hint 'usually preinstalled on macOS' 'sudo apt install lsof')"
 
 echo
 echo "Optional tools"
-check_cmd kubectl "optional: kctx/kns/klog/kexec/kpf" "brew install kubectl"
-check_cmd terraform "optional: tfplan/tfsum/tfapply" "brew install terraform"
-check_cmd tf-summarize "optional: tfsum" "install tf-summarize"
-check_cmd aws "optional: awsp/assm/tfapply" "brew install awscli"
-check_cmd session-manager-plugin "optional: assm" "brew install session-manager-plugin"
-check_cmd age "optional: sec" "brew install age"
-check_cmd jq "optional: sec" "brew install jq"
-check_cmd shellcheck "optional: binbox-check" "brew install shellcheck"
-check_cmd bats "optional: make test" "brew install bats-core"
+check_cmd kubectl "optional: kctx/kns/klog/kexec/kpf/wenv" "$(pkg_hint 'brew install kubectl' 'sudo snap install kubectl --classic')"
+check_cmd terraform "optional: tfx" "$(pkg_hint 'brew install terraform' 'hashicorp apt repo — developer.hashicorp.com/terraform/install')"
+check_cmd tf-summarize "optional: tfx sum" "install tf-summarize"
+check_cmd aws "optional: awsp/assm/wenv/tfx" "$(pkg_hint 'brew install awscli' 'AWS 공식 installer (awscli v2)')"
+check_cmd session-manager-plugin "optional: assm" "$(pkg_hint 'brew install session-manager-plugin' 'AWS 공식 .deb 설치')"
+check_cmd age "optional: sec" "$(pkg_hint 'brew install age' 'sudo apt install age')"
+check_cmd jq "optional: sec" "$(pkg_hint 'brew install jq' 'sudo apt install jq')"
+check_cmd shellcheck "optional: binbox-check" "$(pkg_hint 'brew install shellcheck' 'sudo apt install shellcheck')"
+check_cmd bats "optional: make test" "$(pkg_hint 'brew install bats-core' 'sudo apt install bats')"
 
 echo
 if ((core_missing)); then

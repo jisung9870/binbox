@@ -113,10 +113,12 @@ clipboard_copy() {
     printf '%s' "$1" | pbcopy
   elif command -v clip.exe >/dev/null 2>&1; then
     printf '%s' "$1" | clip.exe
+  elif command -v wl-copy >/dev/null 2>&1; then
+    printf '%s' "$1" | wl-copy
   elif command -v xclip >/dev/null 2>&1; then
     printf '%s' "$1" | xclip -selection clipboard
   else
-    die "클립보드 명령을 찾을 수 없습니다. (pbcopy/clip.exe/xclip)"
+    die "클립보드 명령을 찾을 수 없습니다. (pbcopy/clip.exe/wl-copy/xclip)"
   fi
 }
 

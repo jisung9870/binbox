@@ -7,13 +7,14 @@ _binbox_root="${0:A:h}"
 # libexec의 모든 실행 파일을 alias로 복원 (bb new로 추가한 도구도 자동 반영)
 for _t in "$_binbox_root"/libexec/*(N.x:t); do
   case "$_t" in
-    awsp) ;; # 아래에서 eval 래핑 함수로 정의
+    awsp|wenv) ;; # 아래에서 eval 래핑 함수로 정의
     *) alias "$_t"="bb $_t" ;;
   esac
 done
 unset _t
 
-# awsp는 부모 셸의 AWS_PROFILE을 바꿔야 하므로 eval 래핑
+# awsp/wenv는 부모 셸의 환경변수를 바꿔야 하므로 eval 래핑
 awsp() { eval "$(bb awsp "$@")"; }
+wenv() { eval "$(bb wenv "$@")"; }
 
 unset _binbox_root

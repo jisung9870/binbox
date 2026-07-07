@@ -35,7 +35,12 @@ if [[ -n "$KILL" && "$KILL" != "--kill" ]]; then
   die "알 수 없는 옵션: $KILL"
 fi
 
-need_cmd lsof "usually preinstalled on macOS"
+# lsof: macOS는 기본 포함. Linux는 ss로 조회 가능하지만 --kill(PID 추출)은 lsof 필요
+if [[ "$(uname)" == "Darwin" ]]; then
+  need_cmd lsof "usually preinstalled on macOS"
+elif [[ "$KILL" == "--kill" ]] || ! command -v ss >/dev/null; then
+  need_cmd lsof "sudo apt install lsof"
+fi
 
 if [[ "$(uname)" == "Darwin" ]]; then
   result=$(lsof -i :"$PORT" -P -n 2>/dev/null || true)

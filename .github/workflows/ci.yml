@@ -33,7 +33,7 @@ jobs:
           echo "$HOME/bash32" >> "$GITHUB_PATH"
 
       - name: shellcheck
-        run: ./binbox-check
+        run: ./libexec/binbox-check
 
       - name: bats tests
         run: bats tests/

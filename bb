@@ -17,13 +17,13 @@ bb — binbox 통합 진입점
   bb <tool> [args...]   도구 실행 (예: bb kctx, bb klog -n mon)
   bb list               도구 목록
   bb help [tool]        전체/도구별 도움말
+  bb setup              초기 설정 자동화: 링크 + zsh/bash rc 등록 (= binbox-setup)
   bb doctor             의존성 점검 (= binbox-doctor)
   bb check              shellcheck 일괄 실행 (= binbox-check)
   bb new <name>         템플릿이 채워진 새 도구 생성 (libexec/<name>)
   bb upgrade            binbox 업데이트 (git pull)
 
-zsh 자동완성: .zshrc에 fpath=(~/binbox/completions $fpath) 추가 (compinit 전)
-개별 명령 복원: .zshrc에 source ~/binbox/aliases.zsh 추가 (tm, kctx 등 alias)
+초기 설정(자동완성·개별 명령 alias 포함)은 bb setup 한 번이면 된다. 수동 설치는 README 참고.
 EOF
 }
 
@@ -43,6 +43,7 @@ resolve_tool() {
   case "$tool" in
     doctor) tool="binbox-doctor" ;;
     check) tool="binbox-check" ;;
+    setup) tool="binbox-setup" ;;
   esac
   [[ "$tool" == */* ]] && die "올바르지 않은 도구 이름: $tool"
   if [[ ! -x "$BINBOX_DIR/libexec/$tool" ]] ||
@@ -103,7 +104,7 @@ case "${1:-}" in
     new_tool="$2"
     [[ "$new_tool" =~ ^[a-z][a-z0-9-]*$ ]] || die "도구 이름은 소문자로 시작, 소문자/숫자/하이픈만 가능합니다: $new_tool"
     case "$new_tool" in
-      list|help|doctor|check|upgrade|new) die "bb 예약어라 사용할 수 없습니다: $new_tool" ;;
+      list|help|doctor|check|upgrade|new|setup) die "bb 예약어라 사용할 수 없습니다: $new_tool" ;;
     esac
     target="$BINBOX_DIR/libexec/$new_tool"
     [[ -e "$target" ]] && die "이미 존재합니다: $target"

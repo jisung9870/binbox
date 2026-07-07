@@ -6,8 +6,10 @@ _bb() {
   subcmds=(
     'list:도구 목록'
     'help:전체/도구별 도움말'
+    'setup:초기 설정 (링크 + rc 등록)'
     'doctor:의존성 점검'
     'check:shellcheck 일괄 실행'
+    'new:새 도구 생성'
     'upgrade:binbox 업데이트'
   )
 
