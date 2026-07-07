@@ -1,0 +1,324 @@
+#!/usr/bin/env bash
+# tfx — terraform 워크플로우 통합 명령 (plan / sum / apply 세션 / state 탐색)
+# 구 tfplan / tfsum / tfapply 통합 (tm과 동일한 단일 명령 + 서브커맨드 구조)
+set -euo pipefail
+
+_self=$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || echo "${BASH_SOURCE[0]}")
+BINBOX_DIR=$(cd "$(dirname "$_self")/.." && pwd)
+# shellcheck source=../lib/common.sh
+source "$BINBOX_DIR/lib/common.sh" || { echo "lib/common.sh not found" >&2; exit 1; }
+
+SESSION_FILE="${XDG_STATE_HOME:-$HOME/.local/state}/binbox/tfsession"
+DEFAULT_MINUTES=15
+PLAN_FILE="${TFPLAN_FILE:-tfplan}"
+
+usage() {
+  cat <<'EOF'
+tfx — terraform 워크플로우 통합 명령
+
+사용법:
+  tfx plan [인자...]      # terraform plan -out=<planfile> (인자 패스스루, AWS 계정 배너)
+  tfx sum [모드] [파일]    # plan 요약 (tf-summarize): tree / stree / draw / md / json
+  tfx session [분]        # apply 세션 시작 — AWS 계정 확인 후 N분 유효 (기본 15분)
+  tfx apply [인자...]     # 세션 유효 시 terraform apply <planfile>
+  tfx status              # 세션 상태 (유효하면 0, 없음/만료면 1)
+  tfx end                 # 세션 즉시 종료
+  tfx state               # fzf state 탐색 (preview: state show) → 선택 주소 출력 (조합용)
+  tfx state list          # terraform state list 그대로 (파이프용)
+  tfx state show          # fzf 선택 → terraform state show
+  tfx state mv            # fzf 선택 → 새 주소 입력 → 확인 후 state mv
+  tfx state rm            # fzf 다중 선택 → 확인 후 state rm
+
+Planfile:
+  기본값은 ./tfplan. 환경변수 TFPLAN_FILE로 지정 가능. (plan/sum/apply 공유)
+
+동작:
+  - plan 파일 apply는 terraform의 yes 확인이 생략되므로 apply 세션이 그 역할을 대신한다.
+  - 세션은 시작 시점의 AWS 계정(STS 기준)에 묶인다. apply 시점에 계정이 다르면 거부.
+  - 세션 시작 시 Account ID 뒷 4자리를 직접 입력해야 한다 (무의식적 y 연타 방지).
+
+예시:
+  tfx plan && tfx sum tree
+  tfx sum md plan-summary.md
+  tfx session 15 && tfx apply
+  terraform taint "$(tfx state)"
+EOF
+}
+
+# 어떤 AWS 계정을 대상으로 하는지 표시 (soft — 비 AWS 프로젝트/aws 미설치면 생략)
+_aws_banner() {
+  local ident
+  if command -v aws >/dev/null 2>&1; then
+    ident=$(aws sts get-caller-identity --output text --query '[Account,Arn]' 2>/dev/null || true)
+    if [[ -n "$ident" ]]; then
+      echo "AWS: ${AWS_PROFILE:-default} / Account $(printf '%s' "$ident" | cut -f1)" >&2
+    fi
+  fi
+}
+
+# --- plan (구 tfplan) ---
+
+cmd_plan() {
+  need_cmd terraform "brew install terraform"
+  _aws_banner
+  terraform plan -out="$PLAN_FILE" "$@"
+  echo
+  echo "✔ saved: $PLAN_FILE   (run: tfx sum [tree|stree|draw|md|json], apply: tfx apply)"
+}
+
+# --- sum (구 tfsum) ---
+
+cmd_sum() {
+  local SUB="${1:-summary}"
+  [[ $# -gt 0 ]] && shift || true
+
+  local EXTRA_OUT=""
+  case "$SUB" in
+    md)
+      case $# in
+        0) ;;
+        1)
+          if [[ -f "$1" && "$(basename "$1")" == "tfplan" ]]; then
+            PLAN_FILE="$1"
+          else
+            EXTRA_OUT="-out=$1"
+          fi
+          ;;
+        2)
+          EXTRA_OUT="-out=$1"
+          PLAN_FILE="$2"
+          ;;
+        *)
+          echo "unexpected argument: $3" >&2
+          usage >&2
+          exit 2
+          ;;
+      esac
+      ;;
+    *)
+      if [[ $# -gt 0 && -f "$1" ]]; then
+        PLAN_FILE="$1"
+        shift
+      fi
+      if [[ $# -gt 0 ]]; then
+        echo "unexpected argument: $1" >&2
+        usage >&2
+        exit 2
+      fi
+      ;;
+  esac
+
+  local FLAGS
+  case "$SUB" in
+    summary) FLAGS=() ;;
+    tree)    FLAGS=(-tree) ;;
+    stree)   FLAGS=(-separate-tree) ;;
+    draw)    FLAGS=(-tree -draw) ;;
+    md)      FLAGS=(-md) ;;
+    json)    FLAGS=(-json) ;;
+    *) echo "unknown subcommand: $SUB" >&2; usage; exit 2 ;;
+  esac
+
+  [[ -f "$PLAN_FILE" ]] || die "plan file not found: $PLAN_FILE (run 'tfx plan' first)"
+
+  need_cmd terraform "brew install terraform"
+  need_cmd tf-summarize "install tf-summarize"
+
+  [[ -n "$EXTRA_OUT" ]] && FLAGS+=("$EXTRA_OUT")
+
+  # ${FLAGS[@]+...}: bash 3.2(macOS 기본)의 set -u는 빈 배열 확장을 unbound로 취급
+  terraform show -json "$PLAN_FILE" | tf-summarize ${FLAGS[@]+"${FLAGS[@]}"}
+}
+
+# --- apply 세션 (구 tfapply) ---
+
+# STS 기준 실제 identity 조회 — stdout: "ACCOUNT<TAB>ARN"
+_identity() {
+  aws sts get-caller-identity --output text --query '[Account,Arn]' 2>/dev/null
+}
+
+_show_identity() {
+  local account="$1" arn="$2" region workspace
+  region="${AWS_REGION:-$(aws configure get region 2>/dev/null || true)}"
+  workspace=$(terraform workspace show 2>/dev/null || true)
+  echo "AWS_PROFILE: ${AWS_PROFILE:-(미설정 — default)}"
+  echo "Account:     $account"
+  echo "ARN:         $arn"
+  echo "Region:      ${region:-(미설정)}"
+  if [[ -n "$workspace" ]]; then
+    echo "Workspace:   $workspace"
+  fi
+}
+
+# 유효한 세션이면 session_account/session_left 설정, 아니면 die
+_session_check() {
+  [[ -f "$SESSION_FILE" ]] || die "apply 세션이 없습니다. 먼저 실행하세요: tfx session"
+  local expires now
+  expires=$(cut -f1 "$SESSION_FILE")
+  session_account=$(cut -f2 "$SESSION_FILE")
+  now=$(date +%s)
+  if (( now >= expires )); then
+    rm -f "$SESSION_FILE"
+    die "apply 세션이 만료되었습니다. 다시 시작하세요: tfx session"
+  fi
+  session_left=$(( (expires - now + 59) / 60 ))
+}
+
+cmd_session() {
+  need_cmd aws "brew install awscli"
+  local minutes="${1:-$DEFAULT_MINUTES}"
+  [[ "$minutes" =~ ^[0-9]+$ && "$minutes" -ge 1 ]] || die "분은 1 이상의 숫자로 지정하세요: $minutes"
+
+  local ident account arn input
+  ident=$(_identity) ||
+    die "AWS 자격 증명을 확인할 수 없습니다." "profile/SSO 로그인 상태를 확인하세요: eval \"\$(awsp)\""
+  account=$(printf '%s' "$ident" | cut -f1)
+  arn=$(printf '%s' "$ident" | cut -f2)
+
+  echo "apply 세션을 시작합니다:"
+  _show_identity "$account" "$arn"
+  echo
+  read -r -p "계정 확인 — Account ID 뒷 4자리 입력: " input
+  [[ "$input" == "${account: -4}" ]] || die "계정 확인 실패. 세션을 시작하지 않습니다."
+
+  mkdir -p "$(dirname "$SESSION_FILE")"
+  printf '%s\t%s\n' "$(( $(date +%s) + minutes * 60 ))" "$account" >"$SESSION_FILE"
+  echo "✓ 세션 시작됨 — ${minutes}분간 apply 가능 (Account: $account)"
+}
+
+cmd_status() {
+  if [[ ! -f "$SESSION_FILE" ]]; then
+    echo "세션 없음"
+    exit 1
+  fi
+  local expires account now
+  expires=$(cut -f1 "$SESSION_FILE")
+  account=$(cut -f2 "$SESSION_FILE")
+  now=$(date +%s)
+  if (( now >= expires )); then
+    echo "세션 만료됨 (Account: $account)"
+    exit 1
+  fi
+  echo "세션 유효 — 약 $(( (expires - now + 59) / 60 ))분 남음 (Account: $account)"
+}
+
+cmd_apply() {
+  need_cmd terraform "brew install terraform"
+  need_cmd aws "brew install awscli"
+  _session_check
+
+  local ident account arn
+  ident=$(_identity) ||
+    die "AWS 자격 증명을 확인할 수 없습니다." "profile/SSO 로그인 상태를 확인하세요: eval \"\$(awsp)\""
+  account=$(printf '%s' "$ident" | cut -f1)
+  arn=$(printf '%s' "$ident" | cut -f2)
+
+  if [[ "$account" != "$session_account" ]]; then
+    die "세션 계정($session_account)과 현재 계정($account)이 다릅니다." \
+      "profile을 바꿨다면 세션을 다시 시작하세요: tfx session"
+  fi
+
+  [[ -f "$PLAN_FILE" ]] || die "plan file not found: $PLAN_FILE (run 'tfx plan' first)"
+
+  _show_identity "$account" "$arn"
+  echo "세션:        약 ${session_left}분 남음"
+  echo
+  echo "→ terraform apply $PLAN_FILE"
+  exec terraform apply "$@" "$PLAN_FILE"
+}
+
+# --- state (신규) ---
+
+# state 주소 목록 조회 — 비어 있거나 조회 실패 시 die
+_state_list() {
+  local list
+  list=$(terraform state list 2>/dev/null) ||
+    die "terraform state를 읽을 수 없습니다. (init/백엔드/작업 디렉토리 확인)"
+  [[ -n "$list" ]] || die "state가 비어 있습니다."
+  printf '%s\n' "$list"
+}
+
+# fzf로 state 주소 선택 (--multi로 다중 선택) — 취소 시 빈 출력
+_state_pick() {
+  local flags=()
+  [[ "${1:-}" == "--multi" ]] && flags+=(-m)
+  _state_list | fzf_pick ${flags[@]+"${flags[@]}"} \
+    --prompt="state 선택: " \
+    --preview 'terraform state show {} 2>/dev/null'
+}
+
+cmd_state() {
+  need_cmd terraform "brew install terraform"
+  local ssub="${1:-}"
+  [[ $# -gt 0 ]] && shift || true
+
+  case "$ssub" in
+    "")
+      need_cmd fzf "brew install fzf"
+      local addr
+      addr=$(_state_pick)
+      [[ -n "$addr" ]] || exit 0
+      printf '%s\n' "$addr"
+      ;;
+    list)
+      terraform state list "$@"
+      ;;
+    show)
+      need_cmd fzf "brew install fzf"
+      local addr
+      addr=$(_state_pick)
+      [[ -n "$addr" ]] || exit 0
+      exec terraform state show "$addr"
+      ;;
+    mv)
+      need_cmd fzf "brew install fzf"
+      local src dest
+      src=$(_state_pick)
+      [[ -n "$src" ]] || exit 0
+      _aws_banner
+      echo "이동 대상: $src"
+      read -r -p "새 주소 입력: " dest
+      [[ -n "$dest" ]] || die "새 주소가 비어 있습니다."
+      confirm "state mv를 실행할까요? ($src → $dest)" || { echo "취소했습니다."; exit 0; }
+      terraform state mv "$src" "$dest"
+      ;;
+    rm)
+      need_cmd fzf "brew install fzf"
+      local picked addrs=()
+      picked=$(_state_pick --multi)
+      [[ -n "$picked" ]] || exit 0
+      while IFS= read -r line; do
+        [[ -n "$line" ]] && addrs+=("$line")
+      done <<<"$picked"
+      _aws_banner
+      echo "제거 대상 (${#addrs[@]}개):"
+      printf '  %s\n' "${addrs[@]}"
+      confirm "위 리소스를 state에서 제거할까요? (인프라는 유지, 관리에서만 제외)" ||
+        { echo "취소했습니다."; exit 0; }
+      terraform state rm "${addrs[@]}"
+      ;;
+    *)
+      echo "unknown state subcommand: $ssub" >&2
+      usage >&2
+      exit 2
+      ;;
+  esac
+}
+
+# --- dispatch ---
+
+case "${1:-}" in
+  ""|-h|--help|help) usage; exit 0 ;;
+  plan)    shift; cmd_plan "$@" ;;
+  sum)     shift; cmd_sum "$@" ;;
+  session) shift; cmd_session "$@" ;;
+  apply)   shift; cmd_apply "$@" ;;
+  status)  cmd_status ;;
+  end)     rm -f "$SESSION_FILE"; echo "세션 종료됨" ;;
+  state)   shift; cmd_state "$@" ;;
+  *)
+    echo "unknown subcommand: $1" >&2
+    usage >&2
+    exit 2
+    ;;
+esac

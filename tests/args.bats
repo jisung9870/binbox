@@ -58,10 +58,10 @@ esac
   [[ "$output" != *"종료됨"* ]]
 }
 
-# --- tfplan ---
+# --- tfx ---
 
-@test "tfplan -h: exits 0" {
-  run "$BINBOX_DIR/libexec/tfplan" -h
+@test "tfx -h: exits 0" {
+  run "$BINBOX_DIR/libexec/tfx" -h
   [ "$status" -eq 0 ]
   [[ "$output" == *"사용법"* ]]
 }
