@@ -161,12 +161,12 @@ run_setup() { # run_setup <SHELL값> [추가 인자...]
   fakebin=$(mktemp -d)
   printf '#!/usr/bin/env bash\ncase "$1" in wenv) echo "export FOO=bar";; assume) echo "export AWS_PROFILE=dev";; *) echo "ran:$*";; esac\n' > "$fakebin/bb"
   chmod +x "$fakebin/bb"
-  run bash --norc -c "export HOME=$fakebin/h PATH=$fakebin:\$PATH; source '$BINBOX_DIR/shell/init.bash'; bb wenv; bb assume dev; echo \"FOO=[\$FOO] AWS_PROFILE=[\$AWS_PROFILE]\"; bb kctx"
+  run bash --norc -c "export HOME=$fakebin/h PATH=$fakebin:\$PATH; source '$BINBOX_DIR/shell/init.bash'; bb wenv; bb assume dev; echo \"FOO=[\$FOO] AWS_PROFILE=[\$AWS_PROFILE]\"; bb kx ctx"
   rm -rf "$fakebin"
   [ "$status" -eq 0 ]
   [[ "$output" == *"FOO=[bar]"* ]] # env 도구는 현재 셸에서 eval됨
   [[ "$output" == *"AWS_PROFILE=[dev]"* ]]
-  [[ "$output" == *"ran:kctx"* ]]  # 일반 도구는 그대로 실행
+  [[ "$output" == *"ran:kx ctx"* ]]  # 일반 도구는 그대로 실행
 }
 
 @test "init.bash: bb assume read-only subcommands are not eval-s" {

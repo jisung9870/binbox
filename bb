@@ -14,7 +14,7 @@ usage() {
 bb — binbox 통합 진입점
 
 사용법:
-  bb <tool> [args...]   도구 실행 (예: bb kctx, bb klog -n mon)
+  bb <tool> [args...]   도구 실행 (예: bb kx ctx, bb kx log -n mon)
   bb list               도구 목록
   bb help [tool]        전체/도구별 도움말
   bb setup              초기 설정 자동화: 링크 + zsh/bash rc 등록 (= binbox-setup)

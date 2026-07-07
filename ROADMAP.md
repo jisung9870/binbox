@@ -19,7 +19,7 @@ binbox의 개선 방향과 계획. 완료된 항목은 기록으로 남긴다.
 - [ ] `agents`의 Go TUI 전환 검토 — 저장소에서 유일하게 로직이 무거운 도구.
       polling 갱신, 상태별 색상, 실시간 pane preview가 필요해지면 bubbletea로 개별 이전.
       전면 Go 이전이 아니라 이 도구 하나만 대상.
-- [ ] `klog` multi-pod 동시 로그 (stern 스타일) — 필요성 생기면 stern 설치를 먼저 검토
+- [ ] `kx log` multi-pod 동시 로그 (stern 스타일) — 필요성 생기면 stern 설치를 먼저 검토
 
 ## 외부 결합 지점
 
@@ -110,6 +110,9 @@ binbox 바깥의 설정이 binbox에 의존하는 곳. **명령어 이름을 바
       후보는 `마커\t표시경로\t실제경로` TSV로 넘기고 `--with-nth=1,2`로 표시만 분리
 - [x] `tm dirs prune` — 존재하지 않는 경로 항목 일괄 정리 (확인 후)
 - [x] `dx.d` node / python 추가 (npm·pip 캐시 마운트 포함)
+- [x] **Kubernetes/Git 카테고리 통합** — `kctx`/`kns`/`klog`/`kexec`/`kpf`를
+      `kx ctx/ns/log/exec/pf`로, `gbr`/`glog`/`gitroot`를 `gx br/log/root`로 병합.
+      기존 개별 명령 파일은 제거하고 `kx`/`gx`만 alias/완성에 노출.
 - [x] **`tfapply` — 세션 기반 terraform apply** — plan 파일 apply는 terraform의
       yes 확인이 생략되는 문제를 래퍼가 대신 해결. STS 기준 identity 배너,
       Account ID 뒷 4자리 입력으로 세션 시작(기본 15분), apply 시점 계정 재검증.

@@ -17,7 +17,7 @@ teardown() {
   run "$BINBOX_DIR/bb"
   [ "$status" -eq 0 ]
   [[ "$output" == *"사용법"* ]]
-  [[ "$output" == *"gitroot"* ]]
+  [[ "$output" == *"gx"* ]]
 }
 
 @test "bb -h: exits 0" {
@@ -29,14 +29,18 @@ teardown() {
 @test "bb list: contains tools, excludes bb itself" {
   run "$BINBOX_DIR/bb" list
   [ "$status" -eq 0 ]
-  [[ "$output" == *"gitroot"* ]]
+  [[ "$output" == *"gx"* ]]
+  [[ "$output" == *"kx"* ]]
   [[ "$output" == *"assume"* ]]
   [[ "$output" != *"awsp"* ]]
   ! printf '%s\n' "$output" | grep -qx "bb"
+  for old in kctx kns klog kexec kpf gbr glog gitroot; do
+    ! printf '%s\n' "$output" | grep -qx "$old"
+  done
 }
 
-@test "bb help gitroot: exits 0 with usage" {
-  run "$BINBOX_DIR/bb" help gitroot
+@test "bb help gx: exits 0 with usage" {
+  run "$BINBOX_DIR/bb" help gx
   [ "$status" -eq 0 ]
   [[ "$output" == *"사용법"* ]]
 }
@@ -52,10 +56,10 @@ teardown() {
   [ "$status" -eq 1 ]
 }
 
-@test "bb gitroot: passes args through inside a git repo" {
+@test "bb gx root: passes args through inside a git repo" {
   repo=$(mktemp -d)
   git -C "$repo" init -q
-  run bash -c "cd '$repo' && '$BINBOX_DIR/bb' gitroot"
+  run bash -c "cd '$repo' && '$BINBOX_DIR/bb' gx root"
   [ "$status" -eq 0 ]
   [[ "$output" == *"$(basename "$repo")" ]]
   rm -rf "$repo"

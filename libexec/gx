@@ -1,0 +1,129 @@
+#!/usr/bin/env bash
+# gx — Git 작업 통합 명령 (br / log / root)
+set -euo pipefail
+
+_self=$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || echo "${BASH_SOURCE[0]}")
+BINBOX_DIR=$(cd "$(dirname "$_self")/.." && pwd)
+# shellcheck source=../lib/common.sh
+source "$BINBOX_DIR/lib/common.sh" || { echo "lib/common.sh not found" >&2; exit 1; }
+
+usage() {
+  cat <<'EOF'
+gx — Git 작업 통합 명령
+
+사용법:
+  gx br [-a|--all] [브랜치]      # 브랜치 선택/전환
+  gx log [git log 인자...]       # fzf 로그 탐색 후 선택한 커밋 해시 출력
+  gx root [--cd]                 # 저장소 루트 경로 출력
+
+예시:
+  gx br
+  gx br -a
+  gx log -- path/to/file
+  cd $(gx root)
+  eval "$(gx root --cd)"
+EOF
+}
+
+cmd_br() {
+  local include_remote=0 current branches remotes selected
+  case "${1:-}" in
+    -h|--help|help) usage; exit 0 ;;
+    -a|--all) include_remote=1; shift ;;
+  esac
+
+  need_cmd git
+
+  git rev-parse --git-dir >/dev/null 2>&1 || die "git 저장소 안에 있지 않습니다."
+
+  if [[ -n "${1:-}" ]]; then
+    git switch "$1"
+    exit $?
+  fi
+
+  need_cmd fzf "brew install fzf"
+
+  current=$(git branch --show-current 2>/dev/null || true)
+  branches=$(git branch --sort=-committerdate --format='%(refname:short)')
+  if ((include_remote)); then
+    remotes=$(git branch -r --sort=-committerdate --format='%(refname:short)' |
+      grep -v ' -> ' | sed 's#^origin/##' || true)
+    branches=$(printf '%s\n%s\n' "$branches" "$remotes" | awk 'NF && !seen[$0]++ {print}')
+  fi
+
+  [[ -n "$branches" ]] || die "브랜치가 없습니다."
+
+  selected=$(printf '%s\n' "$branches" | fzf_pick \
+    --prompt="브랜치 선택 (현재: ${current:-detached}): " \
+    --header="현재: ${current:-detached}" \
+    --preview="git log --oneline --decorate --color=always -15 {}" \
+    --preview-window=down:15:wrap)
+
+  if [[ -n "$selected" ]]; then
+    git switch "$selected" 2>/dev/null || git switch -c "$selected" --track "origin/$selected"
+  fi
+}
+
+cmd_log() {
+  local selected
+  case "${1:-}" in
+    -h|--help|help) usage; exit 0 ;;
+  esac
+
+  need_cmd git
+  need_cmd fzf "brew install fzf"
+
+  git rev-parse --git-dir >/dev/null 2>&1 || die "git 저장소 안에 있지 않습니다."
+
+  selected=$(git log --oneline --decorate --color=always "$@" | fzf_pick \
+    --ansi --no-sort \
+    --prompt="커밋 선택: " \
+    --preview="git show --color=always --stat -p {1}" \
+    --preview-window=right:60%:wrap)
+
+  if [[ -n "$selected" ]]; then
+    git rev-parse "$(printf '%s' "$selected" | awk '{print $1}')"
+  fi
+}
+
+cmd_root() {
+  local root
+  case "${1:-}" in
+    -h|--help|help) usage; exit 0 ;;
+  esac
+
+  root=$(git rev-parse --show-toplevel 2>/dev/null || true)
+  if [[ -z "$root" ]]; then
+    echo "git 저장소 안에 있지 않습니다." >&2
+    exit 1
+  fi
+
+  if [[ "${1:-}" == "--cd" ]]; then
+    printf 'cd %q\n' "$root"
+  else
+    echo "$root"
+  fi
+}
+
+case "${1:-}" in
+  ""|-h|--help|help)
+    usage
+    exit 0
+    ;;
+  br|branch)
+    shift
+    cmd_br "$@"
+    ;;
+  log)
+    shift
+    cmd_log "$@"
+    ;;
+  root)
+    shift
+    cmd_root "$@"
+    ;;
+  *)
+    usage >&2
+    die "알 수 없는 서브커맨드: $1"
+    ;;
+esac

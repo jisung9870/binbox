@@ -96,37 +96,37 @@ esac
   [[ "$output" == *"Unknown tool"* ]]
 }
 
-# --- gitroot ---
+# --- gx root ---
 
-@test "gitroot: prints repo root inside a git repo" {
+@test "gx root: prints repo root inside a git repo" {
   repo=$(mktemp -d)
   git -C "$repo" init -q
   mkdir -p "$repo/sub/dir"
-  run bash -c "cd '$repo/sub/dir' && '$BINBOX_DIR/libexec/gitroot'"
+  run bash -c "cd '$repo/sub/dir' && '$BINBOX_DIR/libexec/gx' root"
   [ "$status" -eq 0 ]
   # macOS 심볼릭 링크(/tmp → /private/tmp) 대응: basename만 비교
   [[ "$output" == *"$(basename "$repo")" ]]
   rm -rf "$repo"
 }
 
-@test "gitroot --cd: prints eval-able cd command" {
+@test "gx root --cd: prints eval-able cd command" {
   repo=$(mktemp -d)
   git -C "$repo" init -q
-  run bash -c "cd '$repo' && '$BINBOX_DIR/libexec/gitroot' --cd"
+  run bash -c "cd '$repo' && '$BINBOX_DIR/libexec/gx' root --cd"
   [ "$status" -eq 0 ]
   [[ "$output" == cd\ * ]]
   rm -rf "$repo"
 }
 
-@test "gitroot: errors outside a git repo" {
+@test "gx root: errors outside a git repo" {
   dir=$(mktemp -d)
-  run bash -c "cd '$dir' && GIT_CEILING_DIRECTORIES='$dir' '$BINBOX_DIR/libexec/gitroot'"
+  run bash -c "cd '$dir' && GIT_CEILING_DIRECTORIES='$dir' '$BINBOX_DIR/libexec/gx' root"
   [ "$status" -eq 1 ]
   rm -rf "$dir"
 }
 
-@test "gitroot -h: prints usage" {
-  run "$BINBOX_DIR/libexec/gitroot" -h
+@test "gx root -h: prints usage" {
+  run "$BINBOX_DIR/libexec/gx" root -h
   [ "$status" -eq 0 ]
   [[ "$output" == *"사용법"* ]]
 }
@@ -141,9 +141,9 @@ esac
 
 # --- help paths ---
 
-@test "kctx/kns -h: exit 0" {
-  run "$BINBOX_DIR/libexec/kctx" -h
+@test "kx ctx/ns -h: exit 0" {
+  run "$BINBOX_DIR/libexec/kx" ctx -h
   [ "$status" -eq 0 ]
-  run "$BINBOX_DIR/libexec/kns" -h
+  run "$BINBOX_DIR/libexec/kx" ns -h
   [ "$status" -eq 0 ]
 }
