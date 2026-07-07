@@ -144,20 +144,73 @@ run_setup() { # run_setup <SHELL값> [추가 인자...]
   [ "$status" -eq 0 ]
 }
 
-@test "init.bash: restores aliases, awsp function, and bb completion" {
-  run bash --norc -c "source '$BINBOX_DIR/shell/init.bash'; alias tm; type -t awsp; complete -p bb"
+@test "init.bash: restores aliases, wraps bb as function, and bb completion" {
+  run bash --norc -c "source '$BINBOX_DIR/shell/init.bash'; alias tm; alias wenv; alias assume 2>/dev/null || true; alias awsp 2>/dev/null || true; type -t bb; complete -p bb"
   [ "$status" -eq 0 ]
   [[ "$output" == *"bb tm"* ]]
-  [[ "$output" == *"function"* ]]
+  [[ "$output" == *"bb wenv"* ]]
+  [[ "$output" != *"bb assume"* ]]
+  [[ "$output" != *"bb awsp"* ]]
+  [[ "$output" == *"function"* ]] # bb는 함수
   [[ "$output" == *"_bb_complete"* ]]
 }
 
-@test "init.zsh: restores aliases and awsp function" {
+@test "init.bash: bb function eval-s env-mutating tools in current shell" {
+  # 가짜 bb: wenv/assume이면 export 문 출력, 아니면 인자 그대로 (bb 함수의 command bb가 이걸 호출)
+  # HOME 격리: init.bash가 ~/.local/bin을 PATH 앞에 붙여도 실제 bb 심링크가 스텁을 가리지 않게
+  fakebin=$(mktemp -d)
+  printf '#!/usr/bin/env bash\ncase "$1" in wenv) echo "export FOO=bar";; assume) echo "export AWS_PROFILE=dev";; *) echo "ran:$*";; esac\n' > "$fakebin/bb"
+  chmod +x "$fakebin/bb"
+  run bash --norc -c "export HOME=$fakebin/h PATH=$fakebin:\$PATH; source '$BINBOX_DIR/shell/init.bash'; bb wenv; bb assume dev; echo \"FOO=[\$FOO] AWS_PROFILE=[\$AWS_PROFILE]\"; bb kctx"
+  rm -rf "$fakebin"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"FOO=[bar]"* ]] # env 도구는 현재 셸에서 eval됨
+  [[ "$output" == *"AWS_PROFILE=[dev]"* ]]
+  [[ "$output" == *"ran:kctx"* ]]  # 일반 도구는 그대로 실행
+}
+
+@test "init.bash: bb assume read-only subcommands are not eval-s" {
+  fakebin=$(mktemp -d)
+  printf '#!/usr/bin/env bash\necho "ran:$*"\n' > "$fakebin/bb"
+  chmod +x "$fakebin/bb"
+  run bash --norc -c "export HOME=$fakebin/h PATH=$fakebin:\$PATH; source '$BINBOX_DIR/shell/init.bash'; bb assume list; bb assume current; bb assume exec dev -- echo ok"
+  rm -rf "$fakebin"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"ran:assume list"* ]]
+  [[ "$output" == *"ran:assume current"* ]]
+  [[ "$output" == *"ran:assume exec dev -- echo ok"* ]]
+}
+
+@test "init.bash: bb function preserves env-tool failures" {
+  fakebin=$(mktemp -d)
+  printf '#!/usr/bin/env bash\ncase "$1" in wenv) exit 42;; *) echo "ran:$*";; esac\n' > "$fakebin/bb"
+  chmod +x "$fakebin/bb"
+  run bash --norc -c "export HOME=$fakebin/h PATH=$fakebin:\$PATH; source '$BINBOX_DIR/shell/init.bash'; bb wenv; echo \"status=\$?\""
+  rm -rf "$fakebin"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"status=42"* ]]
+}
+
+@test "init.zsh: restores aliases and wraps bb as function" {
   command -v zsh >/dev/null || skip "zsh not installed"
-  run zsh -f -c "source '$BINBOX_DIR/shell/init.zsh'; alias tm; whence -w awsp"
+  run zsh -f -c "source '$BINBOX_DIR/shell/init.zsh'; alias tm; alias wenv; alias assume 2>/dev/null || true; alias awsp 2>/dev/null || true; whence -w bb"
   [ "$status" -eq 0 ]
   [[ "$output" == *"bb tm"* ]]
-  [[ "$output" == *"function"* ]]
+  [[ "$output" == *"bb wenv"* ]]
+  [[ "$output" != *"bb assume"* ]]
+  [[ "$output" != *"bb awsp"* ]]
+  [[ "$output" == *"function"* ]] # bb는 함수
+}
+
+@test "init.zsh: bb function preserves env-tool failures" {
+  command -v zsh >/dev/null || skip "zsh not installed"
+  fakebin=$(mktemp -d)
+  printf '#!/usr/bin/env bash\ncase "$1" in wenv) exit 42;; *) echo "ran:$*";; esac\n' > "$fakebin/bb"
+  chmod +x "$fakebin/bb"
+  run zsh -f -c "export HOME=$fakebin/h PATH=$fakebin:\$PATH; source '$BINBOX_DIR/shell/init.zsh'; bb wenv; echo \"status=\$?\""
+  rm -rf "$fakebin"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"status=42"* ]]
 }
 
 @test "init.zsh: double sourcing is guarded" {

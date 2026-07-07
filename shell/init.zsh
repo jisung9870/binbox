@@ -27,7 +27,7 @@ if (( $+functions[compdef] )); then
   unset _binbox_line _binbox_svcs
 fi
 
-# 3) 개별 명령 alias + awsp 함수 복원
+# 3) 개별 명령 alias 복원
 source "$_binbox_dir/aliases.zsh"
 
 unset _binbox_dir

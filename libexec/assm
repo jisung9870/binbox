@@ -22,7 +22,7 @@ assm — fzf로 EC2 인스턴스 선택 후 SSM 세션 접속 / 포트포워딩
   assm pf 8080                  # localhost:8080 → 인스턴스:8080
   assm pf mydb.internal:5432 15432   # localhost:15432 → (인스턴스 경유) mydb:5432
 
-profile/region은 AWS_PROFILE / AWS_REGION 환경변수를 따른다. (awsp/wenv와 연동)
+profile/region은 AWS_PROFILE / AWS_REGION 환경변수를 따른다. (assume/wenv와 연동)
 
 요구 사항:
   aws cli, session-manager-plugin

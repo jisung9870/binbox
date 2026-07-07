@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # wenv — 프리셋 기반 작업 환경 전환 (AWS profile/region + kube context/namespace + 추가 export)
-# awsp처럼 export 문을 stdout으로 출력한다. eval "$(wenv <프리셋>)" 로 사용하거나
+# export 문을 stdout으로 출력한다. eval "$(wenv <프리셋>)" 로 사용하거나
 # aliases.zsh / shell/init.bash가 제공하는 wenv() 함수를 쓴다.
 set -euo pipefail
 
@@ -77,10 +77,16 @@ cmd_apply() {
   # shellcheck source=/dev/null
   source "$file" || die "프리셋을 읽을 수 없습니다: $file"
 
-  # eval 없이 실행하면 export가 부모 셸에 적용되지 않으므로 stdout이 TTY면 안내
+  # wenv의 출력(export 문)은 현재 셸에서 eval돼야 적용된다. 대화형 셸에서는 bb 함수가
+  # wenv를 자동 eval하므로 'wenv'·'bb wenv' 모두 동작한다. stdout이 TTY면 raw 실행이므로 안내.
   if [[ -t 1 ]]; then
-    echo "환경변수를 실제로 바꾸려면 eval로 실행하세요:" >&2
-    echo "  eval \"\$(bb wenv $name)\"  (aliases.zsh의 wenv 함수는 자동으로 처리)" >&2
+    {
+      echo "wenv는 현재 셸의 환경변수를 바꾸므로 셸에 로드된 상태로 실행해야 적용됩니다:"
+      echo
+      echo "    wenv $name                 # 대화형 셸 (bb wenv 도 동일하게 동작)"
+      echo "    eval \"\$(bb wenv $name)\"   # 스크립트 등 함수가 없는 곳"
+    } >&2
+    exit 0
   fi
 
   local applied=0 kv key val

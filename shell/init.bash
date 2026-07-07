@@ -20,15 +20,41 @@ for _t in "$_binbox_dir"/libexec/*; do
   _name=${_t##*/}
   # shellcheck disable=SC2139 # 정의 시점 확장이 의도된 동작 (도구별 alias)
   case "$_name" in
-    awsp|wenv) ;; # 아래에서 eval 래핑 함수로 정의
+    assume) ;; # bb assume만 제공한다 (bare assume은 Granted 등 외부 명령과 충돌 가능)
     *) alias "$_name"="bb $_name" ;;
   esac
 done
 unset _t _name
 
-# awsp/wenv는 부모 셸의 환경변수를 바꿔야 하므로 eval 래핑
-awsp() { eval "$(bb awsp "$@")"; }
-wenv() { eval "$(bb wenv "$@")"; }
+# 환경변수를 바꾸는 도구(wenv/assume)는 자식 프로세스로 실행하면 부모 셸에 적용되지 않는다.
+# bb를 함수로 감싸 이 도구만 현재 셸에서 eval → 'bb wenv'와 'bb assume'이 env를 적용한다.
+# 새 env 변경 도구를 추가하면 아래 case에 " 이름 " 을 넣는다.
+bb() {
+  case " ${1:-} " in
+    " wenv ")
+      local _bb_env_output _bb_env_status
+      _bb_env_output=$(command bb "$@")
+      _bb_env_status=$?
+      [ "$_bb_env_status" -eq 0 ] || return "$_bb_env_status"
+      eval "$_bb_env_output"
+      ;;
+    " assume ")
+      case " ${2:-} " in
+        " list "|" current "|" exec "|" help "|" -h "|" --help ")
+          command bb "$@"
+          ;;
+        *)
+          local _bb_env_output _bb_env_status
+          _bb_env_output=$(command bb "$@")
+          _bb_env_status=$?
+          [ "$_bb_env_status" -eq 0 ] || return "$_bb_env_status"
+          eval "$_bb_env_output"
+          ;;
+      esac
+      ;;
+    *) command bb "$@" ;;
+  esac
+}
 
 # 3) bb 자동완성 (완성 시점에 bb list 호출 — 도구 추가 자동 반영)
 _bb_complete() {

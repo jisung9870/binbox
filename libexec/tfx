@@ -171,7 +171,7 @@ cmd_session() {
 
   local ident account arn input
   ident=$(_identity) ||
-    die "AWS 자격 증명을 확인할 수 없습니다." "profile/SSO 로그인 상태를 확인하세요: eval \"\$(awsp)\""
+    die "AWS 자격 증명을 확인할 수 없습니다." "assume <profile> 또는 AWS_PROFILE/SSO 로그인 상태를 확인하세요."
   account=$(printf '%s' "$ident" | cut -f1)
   arn=$(printf '%s' "$ident" | cut -f2)
 
@@ -209,7 +209,7 @@ cmd_apply() {
 
   local ident account arn
   ident=$(_identity) ||
-    die "AWS 자격 증명을 확인할 수 없습니다." "profile/SSO 로그인 상태를 확인하세요: eval \"\$(awsp)\""
+    die "AWS 자격 증명을 확인할 수 없습니다." "assume <profile> 또는 AWS_PROFILE/SSO 로그인 상태를 확인하세요."
   account=$(printf '%s' "$ident" | cut -f1)
   arn=$(printf '%s' "$ident" | cut -f2)
 

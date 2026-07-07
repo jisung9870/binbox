@@ -1,0 +1,409 @@
+#!/usr/bin/env bash
+# assume — AWS SSO/role profile을 임시 credentials로 현재 셸에 적용
+set -euo pipefail
+
+_self=$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || echo "${BASH_SOURCE[0]}")
+BINBOX_DIR=$(cd "$(dirname "$_self")/.." && pwd)
+# shellcheck source=../lib/common.sh
+source "$BINBOX_DIR/lib/common.sh" || { echo "lib/common.sh not found" >&2; exit 1; }
+
+AWS_CONFIG_FILE="${AWS_CONFIG_FILE:-$HOME/.aws/config}"
+AWS_SHARED_CREDENTIALS_FILE="${AWS_SHARED_CREDENTIALS_FILE:-$HOME/.aws/credentials}"
+ASSUME_CACHE_DIR="${BINBOX_ASSUME_CACHE_DIR:-${XDG_CACHE_HOME:-$HOME/.cache}/binbox/assume}"
+SSO_CACHE_DIR="${AWS_SSO_CACHE_DIR:-$HOME/.aws/sso/cache}"
+
+REFRESH=0
+RES_AWS_ACCESS_KEY_ID=""
+RES_AWS_SECRET_ACCESS_KEY=""
+RES_AWS_SESSION_TOKEN=""
+RES_AWS_REGION=""
+RES_AWS_EXPIRATION=""
+
+usage() {
+  cat <<'EOF'
+assume — AWS SSO/role profile을 현재 셸에 적용
+
+사용법:
+  assume                 # fzf로 profile 선택 → 현재 셸에 credentials export
+  assume <profile>       # profile 직접 적용
+  assume --refresh <profile>
+  assume list            # profile 목록
+  assume current         # 현재 AWS env/account 상태
+  assume unset           # AWS/assume env 제거
+  assume exec <profile> -- <cmd...>
+
+지원:
+  - AWS SSO profile (sso_session 또는 legacy sso_* 설정)
+  - role_arn + source_profile chain
+  - static credentials profile은 source_profile으로만 사용
+EOF
+}
+
+_section_name() {
+  local file="$1" profile="$2"
+  if [[ "$profile" == "default" ]] && grep -qE '^[[:space:]]*\[default\][[:space:]]*$' "$file" 2>/dev/null; then
+    printf 'default'
+  else
+    printf 'profile %s' "$profile"
+  fi
+}
+
+_ini_get_section_key() {
+  local file="$1" section="$2" key="$3"
+  [[ -f "$file" ]] || return 1
+  awk -v section="$section" -v key="$key" '
+    function trim(s) { sub(/^[[:space:]]+/, "", s); sub(/[[:space:]]+$/, "", s); return s }
+    /^[[:space:]]*\[/ {
+      name=$0
+      sub(/^[[:space:]]*\[/, "", name)
+      sub(/\][[:space:]]*$/, "", name)
+      in_section = (name == section)
+      next
+    }
+    in_section && /^[[:space:]]*[^#;][^=]*=/ {
+      k=$0
+      sub(/=.*/, "", k)
+      k=trim(k)
+      if (k == key) {
+        v=$0
+        sub(/^[^=]*=/, "", v)
+        print trim(v)
+        exit
+      }
+    }
+  ' "$file"
+}
+
+_config_get() {
+  local profile="$1" key="$2" section
+  section=$(_section_name "$AWS_CONFIG_FILE" "$profile")
+  _ini_get_section_key "$AWS_CONFIG_FILE" "$section" "$key"
+}
+
+_cred_get() {
+  local profile="$1" key="$2"
+  _ini_get_section_key "$AWS_SHARED_CREDENTIALS_FILE" "$profile" "$key"
+}
+
+_sso_session_get() {
+  local session="$1" key="$2"
+  _ini_get_section_key "$AWS_CONFIG_FILE" "sso-session $session" "$key"
+}
+
+_profiles() {
+  {
+    if [[ -f "$AWS_CONFIG_FILE" ]]; then
+      awk '
+        /^[[:space:]]*\[/ {
+          name=$0
+          sub(/^[[:space:]]*\[/, "", name)
+          sub(/\][[:space:]]*$/, "", name)
+          if (name == "default") print "default"
+          else if (name ~ /^profile /) { sub(/^profile /, "", name); print name }
+        }
+      ' "$AWS_CONFIG_FILE"
+    fi
+  } | sort -u
+}
+
+_pick_profile() {
+  local names selected
+  names=$(_profiles)
+  [[ -n "$names" ]] || die "AWS profile을 찾을 수 없습니다: $AWS_CONFIG_FILE"
+  need_cmd fzf "brew install fzf"
+  selected=$(printf '%s\n' "$names" | fzf_pick --prompt="AWS profile: " --header="현재: ${AWS_PROFILE:-없음}")
+  [[ -n "$selected" ]] || return 0
+  printf '%s' "$selected"
+}
+
+_cache_key() {
+  printf '%s' "$1" | tr -c 'A-Za-z0-9_.@=-' '_'
+}
+
+_cache_file() {
+  printf '%s/%s.json' "$ASSUME_CACHE_DIR" "$(_cache_key "$1")"
+}
+
+_load_cache() {
+  local profile="$1" file now expiration
+  [[ "$REFRESH" -eq 0 ]] || return 1
+  file=$(_cache_file "$profile")
+  [[ -f "$file" ]] || return 1
+  need_cmd jq "brew install jq"
+  now=$(date +%s)
+  expiration=$(jq -r '.Expiration // 0' "$file" 2>/dev/null || echo 0)
+  [[ "$expiration" =~ ^[0-9]+$ ]] || return 1
+  (( expiration > now )) || return 1
+  RES_AWS_ACCESS_KEY_ID=$(jq -r '.AccessKeyId' "$file")
+  RES_AWS_SECRET_ACCESS_KEY=$(jq -r '.SecretAccessKey' "$file")
+  RES_AWS_SESSION_TOKEN=$(jq -r '.SessionToken // empty' "$file")
+  RES_AWS_REGION=$(jq -r '.Region // empty' "$file")
+  RES_AWS_EXPIRATION="$expiration"
+  [[ -n "$RES_AWS_ACCESS_KEY_ID" && -n "$RES_AWS_SECRET_ACCESS_KEY" ]]
+}
+
+_write_cache() {
+  local profile="$1"
+  mkdir -p "$ASSUME_CACHE_DIR"
+  chmod 700 "$ASSUME_CACHE_DIR" 2>/dev/null || true
+  jq -n \
+    --arg access_key_id "$RES_AWS_ACCESS_KEY_ID" \
+    --arg secret_access_key "$RES_AWS_SECRET_ACCESS_KEY" \
+    --arg session_token "$RES_AWS_SESSION_TOKEN" \
+    --arg region "$RES_AWS_REGION" \
+    --argjson expiration "${RES_AWS_EXPIRATION:-0}" \
+    '{
+      AccessKeyId: $access_key_id,
+      SecretAccessKey: $secret_access_key,
+      SessionToken: $session_token,
+      Region: $region,
+      Expiration: $expiration
+    }' >"$(_cache_file "$profile")"
+  chmod 600 "$(_cache_file "$profile")" 2>/dev/null || true
+}
+
+_require_profile_exists() {
+  local profile="$1" section
+  section=$(_section_name "$AWS_CONFIG_FILE" "$profile")
+  if _ini_get_section_key "$AWS_CONFIG_FILE" "$section" region >/dev/null ||
+    _ini_get_section_key "$AWS_CONFIG_FILE" "$section" role_arn >/dev/null ||
+    _ini_get_section_key "$AWS_CONFIG_FILE" "$section" sso_session >/dev/null ||
+    _ini_get_section_key "$AWS_CONFIG_FILE" "$section" sso_start_url >/dev/null ||
+    _cred_get "$profile" aws_access_key_id >/dev/null; then
+    return 0
+  fi
+  die "존재하지 않거나 지원하지 않는 profile: $profile"
+}
+
+_find_sso_token() {
+  local start_url="$1" session_name="$2" file token expires
+  [[ -d "$SSO_CACHE_DIR" ]] || return 1
+  while IFS= read -r -d '' file; do
+    if jq -e --arg start "$start_url" --arg session "$session_name" \
+      '((.startUrl? == $start) or (.sessionName? == $session)) and (.accessToken? != null) and ((.expiresAt | fromdateiso8601) > now)' \
+      "$file" >/dev/null 2>&1; then
+      token=$(jq -r '.accessToken' "$file")
+      expires=$(jq -r '.expiresAt' "$file")
+      printf '%s\t%s\n' "$token" "$expires"
+      return 0
+    fi
+  done < <(find "$SSO_CACHE_DIR" -type f -name '*.json' -print0 2>/dev/null)
+  return 1
+}
+
+_get_sso_token() {
+  local profile="$1" start_url="$2" sso_region="$3" session_name="$4" found
+  found=$(_find_sso_token "$start_url" "$session_name" || true)
+  if [[ -z "$found" ]]; then
+    echo "SSO token이 없거나 만료되었습니다. aws sso login 실행: $profile" >&2
+    AWS_PAGER='' aws --no-cli-pager sso login --profile "$profile" >&2
+    found=$(_find_sso_token "$start_url" "$session_name" || true)
+  fi
+  [[ -n "$found" ]] || die "SSO token을 찾을 수 없습니다. ($profile / $sso_region)"
+  printf '%s' "${found%%$'\t'*}"
+}
+
+_resolve_static() {
+  local profile="$1"
+  RES_AWS_ACCESS_KEY_ID=$(_cred_get "$profile" aws_access_key_id || _config_get "$profile" aws_access_key_id || true)
+  RES_AWS_SECRET_ACCESS_KEY=$(_cred_get "$profile" aws_secret_access_key || _config_get "$profile" aws_secret_access_key || true)
+  RES_AWS_SESSION_TOKEN=$(_cred_get "$profile" aws_session_token || _config_get "$profile" aws_session_token || true)
+  RES_AWS_REGION=$(_config_get "$profile" region || true)
+  RES_AWS_EXPIRATION=4102444800
+  [[ -n "$RES_AWS_ACCESS_KEY_ID" && -n "$RES_AWS_SECRET_ACCESS_KEY" ]] ||
+    die "static credentials를 찾을 수 없습니다: $profile"
+}
+
+_resolve_sso() {
+  local profile="$1" session_name start_url sso_region account_id role_name token json
+  session_name=$(_config_get "$profile" sso_session || true)
+  if [[ -n "$session_name" ]]; then
+    start_url=$(_sso_session_get "$session_name" sso_start_url || true)
+    sso_region=$(_sso_session_get "$session_name" sso_region || true)
+  else
+    start_url=$(_config_get "$profile" sso_start_url || true)
+    sso_region=$(_config_get "$profile" sso_region || true)
+  fi
+  account_id=$(_config_get "$profile" sso_account_id || true)
+  role_name=$(_config_get "$profile" sso_role_name || true)
+  [[ -n "$start_url" && -n "$sso_region" && -n "$account_id" && -n "$role_name" ]] ||
+    die "SSO profile 설정이 불완전합니다: $profile"
+
+  token=$(_get_sso_token "$profile" "$start_url" "$sso_region" "$session_name")
+  json=$(AWS_PAGER='' aws --no-cli-pager sso get-role-credentials \
+    --account-id "$account_id" \
+    --role-name "$role_name" \
+    --access-token "$token" \
+    --region "$sso_region" \
+    --output json)
+  RES_AWS_ACCESS_KEY_ID=$(jq -r '.roleCredentials.accessKeyId' <<<"$json")
+  RES_AWS_SECRET_ACCESS_KEY=$(jq -r '.roleCredentials.secretAccessKey' <<<"$json")
+  RES_AWS_SESSION_TOKEN=$(jq -r '.roleCredentials.sessionToken' <<<"$json")
+  RES_AWS_EXPIRATION=$(jq -r '(.roleCredentials.expiration / 1000 | floor)' <<<"$json")
+  RES_AWS_REGION=$(_config_get "$profile" region || true)
+  [[ -n "$RES_AWS_REGION" ]] || RES_AWS_REGION="$sso_region"
+}
+
+_prompt_mfa_token() {
+  local serial="$1" token
+  [[ -t 0 ]] || die "MFA token이 필요하지만 TTY가 없습니다: $serial"
+  read -r -p "MFA token ($serial): " token
+  [[ -n "$token" ]] || die "MFA token이 비어 있습니다."
+  printf '%s' "$token"
+}
+
+_resolve_role() {
+  local profile="$1" depth="$2" source role_arn region duration external_id mfa_serial mfa_token session_name json
+  local src_access src_secret src_token src_region
+  source=$(_config_get "$profile" source_profile || true)
+  role_arn=$(_config_get "$profile" role_arn || true)
+  [[ -n "$source" && -n "$role_arn" ]] || die "role profile 설정이 불완전합니다: $profile"
+
+  _resolve_profile "$source" $((depth + 1)) 1
+  src_access="$RES_AWS_ACCESS_KEY_ID"
+  src_secret="$RES_AWS_SECRET_ACCESS_KEY"
+  src_token="$RES_AWS_SESSION_TOKEN"
+  src_region="$RES_AWS_REGION"
+
+  region=$(_config_get "$profile" region || true)
+  [[ -n "$region" ]] || region="$src_region"
+  duration=$(_config_get "$profile" duration_seconds || true)
+  external_id=$(_config_get "$profile" external_id || true)
+  mfa_serial=$(_config_get "$profile" mfa_serial || true)
+  session_name="bb-${USER:-user}-$(date +%s)"
+
+  local args=(sts assume-role --role-arn "$role_arn" --role-session-name "$session_name" --output json)
+  [[ -n "$duration" ]] && args+=(--duration-seconds "$duration")
+  [[ -n "$external_id" ]] && args+=(--external-id "$external_id")
+  if [[ -n "$mfa_serial" ]]; then
+    mfa_token=$(_prompt_mfa_token "$mfa_serial")
+    args+=(--serial-number "$mfa_serial" --token-code "$mfa_token")
+  fi
+  [[ -n "$region" ]] && args+=(--region "$region")
+
+  json=$(AWS_ACCESS_KEY_ID="$src_access" \
+    AWS_SECRET_ACCESS_KEY="$src_secret" \
+    AWS_SESSION_TOKEN="$src_token" \
+    AWS_PROFILE='' \
+    AWS_PAGER='' aws --no-cli-pager "${args[@]}")
+  RES_AWS_ACCESS_KEY_ID=$(jq -r '.Credentials.AccessKeyId' <<<"$json")
+  RES_AWS_SECRET_ACCESS_KEY=$(jq -r '.Credentials.SecretAccessKey' <<<"$json")
+  RES_AWS_SESSION_TOKEN=$(jq -r '.Credentials.SessionToken' <<<"$json")
+  RES_AWS_EXPIRATION=$(jq -r '.Credentials.Expiration | fromdateiso8601' <<<"$json")
+  RES_AWS_REGION="$region"
+}
+
+_resolve_profile() {
+  local profile="$1" depth="${2:-0}" allow_static="${3:-0}" role_arn sso_session sso_start_url
+  (( depth <= 8 )) || die "profile chain이 너무 깊습니다: $profile"
+  need_cmd aws "brew install awscli"
+  need_cmd jq "brew install jq"
+  _require_profile_exists "$profile"
+
+  if _load_cache "$profile"; then
+    return 0
+  fi
+
+  role_arn=$(_config_get "$profile" role_arn || true)
+  sso_session=$(_config_get "$profile" sso_session || true)
+  sso_start_url=$(_config_get "$profile" sso_start_url || true)
+  if [[ -n "$role_arn" ]]; then
+    _resolve_role "$profile" "$depth"
+  elif [[ -n "$sso_session" || -n "$sso_start_url" ]]; then
+    _resolve_sso "$profile"
+  elif [[ "$allow_static" -eq 1 ]]; then
+    _resolve_static "$profile"
+    return 0
+  else
+    die "직접 적용할 수 없는 profile입니다: $profile" "SSO 또는 role_arn profile을 지정하세요."
+  fi
+
+  [[ -n "$RES_AWS_ACCESS_KEY_ID" && -n "$RES_AWS_SECRET_ACCESS_KEY" ]] ||
+    die "credentials 발급에 실패했습니다: $profile"
+  _write_cache "$profile"
+}
+
+_emit_exports() {
+  local profile="$1"
+  printf 'unset AWS_PROFILE\n'
+  printf 'export AWS_ACCESS_KEY_ID=%q\n' "$RES_AWS_ACCESS_KEY_ID"
+  printf 'export AWS_SECRET_ACCESS_KEY=%q\n' "$RES_AWS_SECRET_ACCESS_KEY"
+  printf 'export AWS_SESSION_TOKEN=%q\n' "$RES_AWS_SESSION_TOKEN"
+  printf 'export AWS_SESSION_EXPIRATION=%q\n' "$RES_AWS_EXPIRATION"
+  printf 'export AWS_CREDENTIAL_EXPIRATION=%q\n' "$RES_AWS_EXPIRATION"
+  printf 'export BINBOX_ASSUME_PROFILE=%q\n' "$profile"
+  if [[ -n "$RES_AWS_REGION" ]]; then
+    printf 'export AWS_REGION=%q\n' "$RES_AWS_REGION"
+    printf 'export AWS_DEFAULT_REGION=%q\n' "$RES_AWS_REGION"
+  fi
+  echo "✓ assumed: $profile${RES_AWS_REGION:+ ($RES_AWS_REGION)}" >&2
+}
+
+cmd_unset() {
+  cat <<'EOF'
+unset AWS_ACCESS_KEY_ID
+unset AWS_SECRET_ACCESS_KEY
+unset AWS_SESSION_TOKEN
+unset AWS_PROFILE
+unset AWS_REGION
+unset AWS_DEFAULT_REGION
+unset AWS_SESSION_EXPIRATION
+unset AWS_CREDENTIAL_EXPIRATION
+unset BINBOX_ASSUME_PROFILE
+EOF
+  echo "✓ AWS env unset" >&2
+}
+
+cmd_current() {
+  echo "AWS_PROFILE:              ${AWS_PROFILE:-(unset)}"
+  echo "BINBOX_ASSUME_PROFILE:    ${BINBOX_ASSUME_PROFILE:-(unset)}"
+  echo "AWS_REGION:               ${AWS_REGION:-${AWS_DEFAULT_REGION:-(unset)}}"
+  echo "AWS_SESSION_EXPIRATION:   ${AWS_SESSION_EXPIRATION:-(unset)}"
+  if command -v aws >/dev/null 2>&1; then
+    AWS_PAGER='' aws --no-cli-pager sts get-caller-identity --output text --query '[Account,Arn]' 2>/dev/null ||
+      echo "caller identity:          (unavailable)"
+  fi
+}
+
+cmd_exec() {
+  local profile="${1:-}"
+  [[ -n "$profile" ]] || die "사용법: assume exec <profile> -- <cmd...>"
+  shift
+  [[ "${1:-}" == "--" ]] || die "사용법: assume exec <profile> -- <cmd...>"
+  shift
+  [[ $# -gt 0 ]] || die "실행할 명령을 지정하세요."
+  _resolve_profile "$profile"
+  AWS_ACCESS_KEY_ID="$RES_AWS_ACCESS_KEY_ID" \
+    AWS_SECRET_ACCESS_KEY="$RES_AWS_SECRET_ACCESS_KEY" \
+    AWS_SESSION_TOKEN="$RES_AWS_SESSION_TOKEN" \
+    AWS_REGION="$RES_AWS_REGION" \
+    AWS_DEFAULT_REGION="$RES_AWS_REGION" \
+    AWS_SESSION_EXPIRATION="$RES_AWS_EXPIRATION" \
+    AWS_CREDENTIAL_EXPIRATION="$RES_AWS_EXPIRATION" \
+    BINBOX_ASSUME_PROFILE="$profile" \
+    AWS_PROFILE='' \
+    exec "$@"
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -h|--help|help) usage; exit 0 ;;
+    --refresh) REFRESH=1; shift ;;
+    list) _profiles; exit 0 ;;
+    current) cmd_current; exit 0 ;;
+    unset) cmd_unset; exit 0 ;;
+    exec) shift; cmd_exec "$@" ;;
+    --) shift; break ;;
+    -*) die "알 수 없는 옵션: $1" ;;
+    *) break ;;
+  esac
+done
+
+profile="${1:-}"
+if [[ -z "$profile" ]]; then
+  profile=$(_pick_profile)
+  [[ -n "$profile" ]] || exit 0
+fi
+[[ $# -le 1 ]] || die "알 수 없는 인자: $2"
+_resolve_profile "$profile"
+_emit_exports "$profile"

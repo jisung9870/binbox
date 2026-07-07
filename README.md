@@ -61,6 +61,11 @@ sudo apt install tmux fzf git jq age lsof shellcheck bats
 개별 명령어(`tm`, `kctx` 등)는 `aliases.zsh`를 source하면 alias로 복원되어 기존처럼 쓸 수 있다.
 tmux/nvim 등 비인터랙티브 환경에서는 alias가 없으므로 `bb tm`처럼 호출한다.
 
+환경변수를 바꾸는 도구(`wenv`, `assume`)는 자식 프로세스로 실행하면 부모 셸에 적용되지 않으므로,
+셸 init이 `bb`를 함수로 감싸 현재 셸에서 자동 eval한다. 따라서 대화형 셸에서는
+`bb wenv`/`wenv`, `bb assume`이 env를 적용한다. 비대화형/스크립트에서는
+`eval "$(bb wenv <preset>)"` 또는 `eval "$(bb assume <profile>)"`로 쓴다.
+
 ```bash
 bb                # 사용법 + 도구 목록
 bb list           # 도구 목록
@@ -130,13 +135,14 @@ kpf my-pod 9000:8080
 
 | 명령어 | 설명 |
 |--------|------|
-| `awsp` | AWS_PROFILE 전환 (eval 패턴) |
+| `assume` | AWS SSO/role profile을 임시 credentials로 현재 셸에 적용 (`bb assume` 전용) |
 | `assm` | 실행 중 EC2 선택 → SSM 세션 접속 / 포트포워딩 |
-| `wenv` | 프리셋 기반 작업 환경 전환 — AWS profile/region + kube context/namespace (eval 패턴) |
+| `wenv` | 프리셋 기반 작업 환경 전환 — AWS profile/region + kube context/namespace |
 
 ```bash
-eval "$(awsp)"             # 자식 프로세스는 부모 셸 env를 못 바꾸므로 eval 필요
-                           # (aliases.zsh/init.bash가 awsp·wenv 함수를 자동 제공)
+bb assume lg-pak-ops       # AWS SSO/role profile → 임시 credentials export
+bb assume current          # 현재 env/account 확인
+bb assume unset            # AWS env 제거
 assm                       # 인스턴스 선택 → 셸 접속
 assm pf 8080               # 인스턴스 선택 → localhost:8080 → 인스턴스:8080
 assm pf db.internal:5432 15432  # 인스턴스 경유 원격 호스트 포워딩 (RDS 등)
@@ -293,7 +299,7 @@ make ci        # check + test
 **Optional**:
 - kubectl — kctx, kns, klog, kexec, kpf, wenv
 - terraform, tf-summarize — tfx
-- aws cli, session-manager-plugin — awsp, assm, wenv, tfx
-- age, jq — sec
+- aws cli, session-manager-plugin — assume, assm, wenv, tfx
+- age, jq — assume, sec
 - shellcheck, bats-core — 개발용
 - ss/iproute2 — Linux portcheck (없으면 lsof 대체)

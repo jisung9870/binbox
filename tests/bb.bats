@@ -30,7 +30,8 @@ teardown() {
   run "$BINBOX_DIR/bb" list
   [ "$status" -eq 0 ]
   [[ "$output" == *"gitroot"* ]]
-  [[ "$output" == *"awsp"* ]]
+  [[ "$output" == *"assume"* ]]
+  [[ "$output" != *"awsp"* ]]
   ! printf '%s\n' "$output" | grep -qx "bb"
 }
 

@@ -61,7 +61,7 @@ binbox 바깥의 설정이 binbox에 의존하는 곳. **명령어 이름을 바
       rc 블록은 최소한만 두고 로직은 repo의 `shell/init.zsh`/`init.bash`에 —
       이후 변경은 `bb upgrade`만으로 반영. init.zsh는 compinit 이후 로드돼도
       compdef 수동 등록으로 완성이 동작한다
-- [x] **WSL/bash 지원** — `shell/init.bash`(alias/awsp·wenv 함수/bb 완성),
+- [x] **WSL/bash 지원** — `shell/init.bash`(alias/wenv 함수/bb 완성),
       binbox-doctor OS별 설치 힌트(brew/apt), sec wl-copy 폴백, portcheck lsof 조건 완화
 - [x] **`tfx` — terraform 통합 명령** — 구 tfplan/tfsum/tfapply를 tm처럼 단일 명령으로 병합
       (`tfx plan/sum/session/apply/status/end`) + `tfx state` 신규
@@ -87,11 +87,10 @@ binbox 바깥의 설정이 binbox에 의존하는 곳. **명령어 이름을 바
 - [x] `tmux-kill-pattern`/`portcheck`/`tfplan` usage()/-h 신설 (usage 통일 마무리)
 - [x] `binbox-check`에 `-P SCRIPTDIR` 추가 — repo root 밖 cwd에서 `bb check`가
       SC1091로 실패하던 버그 수정
-- [x] `awsp -h`를 stdout으로 정렬 (`bb help awsp` 파이프 시 빈 화면 문제)
 - [x] 테스트 확충 74개 → 106개 — klog/kexec/kpf 동작 고정 e2e, lib/k8s.sh 단위,
       confirm()/tmux-kill-pattern/portcheck y·n 플로우
 - [x] 개별 명령어 zsh 완성 (`completions/_binbox`) — kctx: context, kns/klog/kexec/kpf:
-      namespace·pod(-n 존중), gbr: 브랜치, awsp: profile, tfsum/sec: 서브커맨드,
+      namespace·pod(-n 존중), gbr: 브랜치, tfsum/sec: 서브커맨드,
       dx: 도구, tm: 서브커맨드·세션·레이아웃.
       `bb <tool> <Tab>`도 `_bb`가 shift 후 `_normal`로 위임해 동일하게 동작.
       sec 서비스명은 복호화가 필요해 의도적으로 제외
@@ -103,22 +102,20 @@ binbox 바깥의 설정이 binbox에 의존하는 곳. **명령어 이름을 바
       (그 디렉토리 자체가 후보), `tm dirs`/`add [-d]`/`rm`/`edit`로 CLI 관리.
       nvim editor.lua 파서도 `=` 인식하도록 동기 수정
 - [x] **bb 일원화 완료** — 도구 20개를 `libexec/`로 이동, PATH에는 `bb`만 노출.
-      개별 명령은 `aliases.zsh`(libexec 자동 스캔, awsp는 eval 래핑 함수)로 복원.
+      개별 명령은 `aliases.zsh`(libexec 자동 스캔, env 변경 도구는 eval 래핑)로 복원.
       bb/binbox-check/Makefile/테스트 경로 갱신, 프롤로그는 `dirname/..` 기준으로 변경.
       외부 호출(tmux bind f, agents 팝업, nvim toggleterm)은 `bb <tool>`로 수정
 - [x] `bb new <name>` — 프롤로그/usage/-h 템플릿이 채워진 도구를 libexec/에 생성
 - [x] `tm go` fzf UX — 세션 존재 마커(●), `~` 축약 표시, git 브랜치/최근 커밋 preview.
       후보는 `마커\t표시경로\t실제경로` TSV로 넘기고 `--with-nth=1,2`로 표시만 분리
 - [x] `tm dirs prune` — 존재하지 않는 경로 항목 일괄 정리 (확인 후)
-- [x] `awsp -r` — profile의 region을 `AWS_REGION`으로 동시 export
-      (aws CLI 우선, 없으면 ~/.aws/config 파싱)
 - [x] `dx.d` node / python 추가 (npm·pip 캐시 마운트 포함)
 - [x] **`tfapply` — 세션 기반 terraform apply** — plan 파일 apply는 terraform의
       yes 확인이 생략되는 문제를 래퍼가 대신 해결. STS 기준 identity 배너,
       Account ID 뒷 4자리 입력으로 세션 시작(기본 15분), apply 시점 계정 재검증.
       `tfplan`에도 AWS 계정 배너 추가 (soft — 비 AWS 프로젝트는 생략)
 - 결정: **need_cmd fzf 배치 규칙** — 인자를 다 줘도 fzf가 필요할 수 있으면 상단 체크
-  (klog/kexec/kpf), 인자를 주면 fzf가 확실히 불필요하면 늦은 체크 유지 (kctx/gbr/awsp)
+  (klog/kexec/kpf), 인자를 주면 fzf가 확실히 불필요하면 늦은 체크 유지 (kctx/gbr)
 - 결정: **`.shellcheckrc` 만들지 않음** — disable 규칙이 0개라 설정 파일이 오히려 노이즈.
   필요해지는 시점에 재검토
 
@@ -145,5 +142,5 @@ binbox 바깥의 설정이 binbox에 의존하는 곳. **명령어 이름을 바
 
 - [x] git: `gbr`, `glog`
 - [x] k8s: `klog`, `kexec`, `kpf`
-- [x] AWS: `awsp`, `assm`
+- [x] AWS: `assm`
 - [x] 시크릿: `sec` (age 암호화 다중 필드 시크릿 스토어, CRUD + fzf copy + env export)
