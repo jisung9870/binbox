@@ -54,6 +54,26 @@ binbox 바깥의 설정이 binbox에 의존하는 곳. **명령어 이름을 바
 
 ## 완료
 
+### 2026-07 — 설치 자동화 / WSL / 워크플로우 통합
+
+- [x] **`bb setup` — 초기 설정 자동화** — `~/.local/bin/bb` 심볼릭 링크 + 셸 감지(zsh/bash) 후
+      rc에 마커 블록으로 `shell/init.*` source 라인 등록 (멱등, 재실행 안전).
+      rc 블록은 최소한만 두고 로직은 repo의 `shell/init.zsh`/`init.bash`에 —
+      이후 변경은 `bb upgrade`만으로 반영. init.zsh는 compinit 이후 로드돼도
+      compdef 수동 등록으로 완성이 동작한다
+- [x] **WSL/bash 지원** — `shell/init.bash`(alias/awsp·wenv 함수/bb 완성),
+      binbox-doctor OS별 설치 힌트(brew/apt), sec wl-copy 폴백, portcheck lsof 조건 완화
+- [x] **`tfx` — terraform 통합 명령** — 구 tfplan/tfsum/tfapply를 tm처럼 단일 명령으로 병합
+      (`tfx plan/sum/session/apply/status/end`) + `tfx state` 신규
+      (fzf 탐색·주소 출력·show / mv·rm은 확인 후 실행)
+- [x] **`wenv` — 프리셋 기반 작업 환경 전환** — AWS_PROFILE/REGION export(eval 패턴) +
+      kube context/namespace 전환 + 추가 EXPORTS. 프리셋은 `~/.config/binbox/wenv.d/<이름>`
+      bash 조각 (dx.d와 동일 방식, `BINBOX_WENV_DIR`로 경로 변경 가능)
+- [x] **`assm pf` — SSM 포트포워딩** — 인스턴스 포트 직접 / 인스턴스 경유 원격 호스트
+      (RDS 등) 모두 지원, 인스턴스는 fzf 선택 또는 `i-*` 직접 지정
+- [x] ci.yml shellcheck 스텝 경로 수정 (`./binbox-check` → `./libexec/binbox-check`,
+      libexec 이동 후 깨져 있던 것)
+
 ### 2026-07 — 카테고리 스크립트 정비
 
 - [x] `lib/k8s.sh` 추출 — klog/kexec/kpf에 3벌 복붙돼 있던 pod/컨테이너 선택 로직 통합

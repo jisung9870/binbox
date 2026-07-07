@@ -8,19 +8,52 @@ fzf 기반 인터랙티브 명령어로 감싼다. Mac / WSL 환경에서 사용
 ```bash
 git clone https://github.com/<your-username>/binbox.git ~/binbox
 
+~/binbox/bb setup   # 링크(~/.local/bin/bb) + zsh/bash rc 자동 구성 (재실행 안전)
+exec $SHELL         # 새 셸에 적용
+bb doctor           # 의존성 점검
+
+# 이후 업데이트
+bb upgrade
+```
+
+`bb setup`이 하는 일:
+
+1. `~/.local/bin/bb` 심볼릭 링크 생성 (repo 위치 무관, PATH에는 표준 경로만 추가)
+2. 로그인 셸 감지(`$SHELL`) → `.zshrc` 또는 `.bashrc`에 마커 블록(`# >>> binbox >>>`)으로
+   `shell/init.zsh`/`shell/init.bash` source 라인 등록
+3. rc 블록은 최소한만 — PATH/자동완성/alias 로직은 repo의 `shell/init.*`에 있어
+   이후 변경은 `bb upgrade`만으로 반영된다 (rc 재수정 불필요)
+
+재실행하면 기존 설정은 그대로 두고("이미 최신") 변경분만 갱신한다. repo를 옮겼거나
+zsh/bash 둘 다 쓰면 `bb setup --shell bash`처럼 지정해 각각 구성한다.
+
+<details>
+<summary>수동 설치 (rc 자동 수정을 원하지 않는 경우)</summary>
+
+```bash
 # .zshrc에 추가
 echo 'export PATH="$HOME/binbox:$PATH"' >> ~/.zshrc
 echo 'fpath=(~/binbox/completions $fpath)' >> ~/.zshrc   # bb + 개별 명령어 자동완성, compinit 전에 위치
 echo 'source ~/binbox/aliases.zsh' >> ~/.zshrc            # 개별 명령(tm, kctx 등) alias 복원
 # 완성이 안 보이면 캐시 재생성: rm -f ~/.zcompdump && exec zsh
-source ~/.zshrc
-
-# 실행 권한 부여 + 의존성 점검
-cd ~/binbox && make install && make doctor
-
-# 이후 업데이트
-bb upgrade
 ```
+
+bash는 `source ~/binbox/shell/init.bash` 한 줄이면 된다 (PATH + alias + bb 완성 포함).
+
+</details>
+
+### WSL / Linux
+
+bash가 로그인 셸이면 `bb setup`이 자동으로 `.bashrc`를 구성한다. 도구 스크립트는 전부
+bash라 그대로 동작하며, 의존성만 설치하면 된다 (`bb doctor`가 OS에 맞는 힌트를 보여준다):
+
+```bash
+sudo apt install tmux fzf git jq age lsof shellcheck bats
+```
+
+- `sec copy` 클립보드: WSL은 `clip.exe`가 기본 동작, Linux 데스크톱은 `wl-copy`(Wayland) 또는 `xclip` 필요
+- docker: Docker Desktop의 WSL integration 활성화 또는 `sudo apt install docker.io`
+- 자동완성: zsh는 개별 명령까지, bash는 `bb <Tab>`만 지원
 
 ## bb — 통합 진입점
 
@@ -33,10 +66,11 @@ bb                # 사용법 + 도구 목록
 bb list           # 도구 목록
 bb help klog      # 도구별 도움말 (= klog -h)
 bb kctx           # 도구 실행 (= kctx)
+bb setup          # 초기 설정 (= binbox-setup, 재실행 안전)
 bb doctor         # = binbox-doctor
 bb check          # = binbox-check
 bb upgrade        # binbox 업데이트 (git pull --ff-only + 변경 로그)
-bb <Tab>          # zsh 자동완성
+bb <Tab>          # 자동완성 (zsh: 개별 명령 포함, bash: bb만)
 ```
 
 ## 도구 목록
@@ -97,30 +131,52 @@ kpf my-pod 9000:8080
 | 명령어 | 설명 |
 |--------|------|
 | `awsp` | AWS_PROFILE 전환 (eval 패턴) |
-| `assm` | 실행 중 EC2 선택 → SSM 세션 접속 |
+| `assm` | 실행 중 EC2 선택 → SSM 세션 접속 / 포트포워딩 |
+| `wenv` | 프리셋 기반 작업 환경 전환 — AWS profile/region + kube context/namespace (eval 패턴) |
 
 ```bash
 eval "$(awsp)"             # 자식 프로세스는 부모 셸 env를 못 바꾸므로 eval 필요
-alias awsp='eval "$(command awsp)"'   # .zshrc 등록 추천
-assm                       # awsp로 profile 설정 후 사용
+                           # (aliases.zsh/init.bash가 awsp·wenv 함수를 자동 제공)
+assm                       # 인스턴스 선택 → 셸 접속
+assm pf 8080               # 인스턴스 선택 → localhost:8080 → 인스턴스:8080
+assm pf db.internal:5432 15432  # 인스턴스 경유 원격 호스트 포워딩 (RDS 등)
+wenv                       # 프리셋 선택 → AWS_PROFILE/REGION + kube context/ns 일괄 전환
+wenv new dev               # 프리셋 생성 (~/.config/binbox/wenv.d/dev)
 ```
 
-### Terraform
-
-| 명령어 | 설명 |
-|--------|------|
-| `tfplan` | `terraform plan -out=tfplan` (인자 패스스루, AWS 계정 배너 표시) |
-| `tfsum` | plan 요약 (tree / stree / draw / md / json) |
-| `tfapply` | 세션 기반 `terraform apply` — 계정 확인(뒷 4자리 입력) 후 N분간만 apply 허용 |
+wenv 프리셋 파일은 bash 문법으로 필요한 항목만 채운다 (비어 있으면 건너뜀):
 
 ```bash
-tfplan && tfsum tree
-tfsum md plan-summary.md
-tfapply session 15   # 현재 AWS 계정 확인 → 15분 세션 시작
-tfapply              # 세션 유효 + 계정 일치 시에만 terraform apply tfplan
+# ~/.config/binbox/wenv.d/dev
+AWS_PROFILE=my-dev
+AWS_REGION=ap-northeast-2
+KUBE_CONTEXT=dev-cluster
+KUBE_NAMESPACE=default
+# EXPORTS=(FOO=bar)        # 추가 export
 ```
 
-plan 파일 apply는 terraform의 yes 확인이 생략되므로 `tfapply`가 그 역할을 대신한다.
+### Terraform — tfx
+
+terraform 워크플로우 통합 명령 (`tm`과 같은 단일 명령 + 서브커맨드 구조).
+
+| 서브커맨드 | 설명 |
+|--------|------|
+| `tfx plan` | `terraform plan -out=tfplan` (인자 패스스루, AWS 계정 배너 표시) |
+| `tfx sum` | plan 요약 (tree / stree / draw / md / json) |
+| `tfx session [분]` | apply 세션 시작 — 계정 확인(뒷 4자리 입력) 후 N분간만 apply 허용 |
+| `tfx apply` | 세션 유효 + 계정 일치 시에만 `terraform apply tfplan` |
+| `tfx state` | state fzf 탐색 (preview: `state show`) + list / show / mv / rm |
+
+```bash
+tfx plan && tfx sum tree
+tfx sum md plan-summary.md
+tfx session 15       # 현재 AWS 계정 확인 → 15분 세션 시작
+tfx apply            # 세션 유효 + 계정 일치 시에만 apply
+tfx state            # fzf 탐색 → 선택 주소 출력 (조합용: terraform taint "$(tfx state)")
+tfx state rm         # 다중 선택 → 확인 후 state에서 제거 (인프라는 유지)
+```
+
+plan 파일 apply는 terraform의 yes 확인이 생략되므로 apply 세션이 그 역할을 대신한다.
 세션은 시작 시점의 AWS 계정(STS 기준)에 묶이며, apply 시점에 계정이 다르면 거부한다.
 
 ### 시크릿 — sec
@@ -175,7 +231,8 @@ DOCKER_OPTS=(
 |--------|------|
 | `portcheck` | 포트 사용 프로세스 확인 (`--kill`로 종료) |
 | `md2jira` | md-to-jiratext 실행 (`MD2JIRA_HOME`으로 위치 지정) |
-| `binbox-doctor` | 의존성 점검 (core 누락만 실패) |
+| `binbox-setup` | 초기 설정 자동화 (링크 + 셸 rc 등록, 멱등) |
+| `binbox-doctor` | 의존성 점검 (core 누락만 실패, OS별 설치 힌트) |
 | `binbox-check` | shellcheck 일괄 실행 (스크립트 자동 탐색) |
 
 ## 설정
@@ -234,9 +291,9 @@ make ci        # check + test
 **Core**: docker, tmux, fzf, git, lsof(macOS 기본)
 
 **Optional**:
-- kubectl — kctx, kns, klog, kexec, kpf
-- terraform, tf-summarize — tfplan, tfsum
-- aws cli, session-manager-plugin — awsp, assm
+- kubectl — kctx, kns, klog, kexec, kpf, wenv
+- terraform, tf-summarize — tfx
+- aws cli, session-manager-plugin — awsp, assm, wenv, tfx
 - age, jq — sec
 - shellcheck, bats-core — 개발용
 - ss/iproute2 — Linux portcheck (없으면 lsof 대체)

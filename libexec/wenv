@@ -1,0 +1,207 @@
+#!/usr/bin/env bash
+# wenv — 프리셋 기반 작업 환경 전환 (AWS profile/region + kube context/namespace + 추가 export)
+# awsp처럼 export 문을 stdout으로 출력한다. eval "$(wenv <프리셋>)" 로 사용하거나
+# aliases.zsh / shell/init.bash가 제공하는 wenv() 함수를 쓴다.
+set -euo pipefail
+
+_self=$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || echo "${BASH_SOURCE[0]}")
+BINBOX_DIR=$(cd "$(dirname "$_self")/.." && pwd)
+# shellcheck source=../lib/common.sh
+source "$BINBOX_DIR/lib/common.sh" || { echo "lib/common.sh not found" >&2; exit 1; }
+
+WENV_DIR="${BINBOX_WENV_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/binbox/wenv.d}"
+
+usage() {
+  cat <<'EOF'
+wenv — 프리셋 기반 작업 환경 전환
+
+사용법:
+  wenv                # fzf로 프리셋 선택 → 적용
+  wenv <프리셋>        # 직접 적용
+  wenv list           # 프리셋 목록
+  wenv current        # 현재 환경 상태 (AWS_PROFILE/REGION, kube context/namespace)
+  wenv new <이름>      # 템플릿 생성 후 $EDITOR로 열기
+  wenv edit [이름]     # 프리셋 편집 (이름 생략 시 fzf)
+  wenv rm [이름]       # 프리셋 삭제 (확인 후)
+
+프리셋 파일 (~/.config/binbox/wenv.d/<이름>, bash 문법):
+  AWS_PROFILE=myprofile      # export AWS_PROFILE
+  AWS_REGION=ap-northeast-2  # export AWS_REGION
+  KUBE_CONTEXT=my-cluster    # kubectl config use-context
+  KUBE_NAMESPACE=my-ns       # 현재 context의 기본 namespace 변경
+  EXPORTS=(FOO=bar)          # 추가 export (KEY=VALUE 배열)
+
+비어 있거나 없는 항목은 건너뛴다. 경로는 BINBOX_WENV_DIR로 변경 가능.
+설정: aliases.zsh가 wenv() { eval "$(bb wenv "$@")"; } 함수를 제공한다.
+EOF
+}
+
+# 프리셋 이름 목록 (파일명, 정렬)
+_presets() {
+  local f
+  for f in "$WENV_DIR"/*; do
+    [[ -f "$f" ]] && basename "$f"
+  done 2>/dev/null | sort
+}
+
+# fzf로 프리셋 선택 — 취소 시 빈 출력. 프리셋이 하나도 없으면 die
+_pick_preset() {
+  local names
+  names=$(_presets)
+  [[ -n "$names" ]] || die "프리셋이 없습니다: $WENV_DIR" "wenv new <이름> 으로 생성하세요."
+  need_cmd fzf "brew install fzf"
+  printf '%s\n' "$names" | fzf_pick \
+    --prompt="프리셋 선택: " \
+    --preview "cat \"$WENV_DIR\"/{}"
+}
+
+# $EDITOR 실행 — eval 래퍼 경유(stdout 캡처) 시 TTY로 리다이렉트, TTY 없으면(CI 등) 그대로 실행
+_edit_file() {
+  if [[ -t 1 ]]; then
+    "${EDITOR:-vi}" "$1"
+  elif { : </dev/tty; } 2>/dev/null; then
+    "${EDITOR:-vi}" "$1" </dev/tty >/dev/tty
+  else
+    "${EDITOR:-vi}" "$1"
+  fi
+}
+
+cmd_apply() {
+  local name="$1"
+  local file="$WENV_DIR/$name"
+  [[ -f "$file" ]] || die "프리셋이 없습니다: $name" "wenv list 로 확인하거나 wenv new $name 으로 생성하세요."
+
+  # 프리셋에 없는 항목이 이전 값과 섞이지 않게 초기화 후 source (dx.d와 동일한 bash 조각 방식)
+  AWS_PROFILE="" AWS_REGION="" KUBE_CONTEXT="" KUBE_NAMESPACE=""
+  EXPORTS=()
+  # shellcheck source=/dev/null
+  source "$file" || die "프리셋을 읽을 수 없습니다: $file"
+
+  # eval 없이 실행하면 export가 부모 셸에 적용되지 않으므로 stdout이 TTY면 안내
+  if [[ -t 1 ]]; then
+    echo "환경변수를 실제로 바꾸려면 eval로 실행하세요:" >&2
+    echo "  eval \"\$(bb wenv $name)\"  (aliases.zsh의 wenv 함수는 자동으로 처리)" >&2
+  fi
+
+  local applied=0 kv key val
+  if [[ -n "$AWS_PROFILE" ]]; then
+    printf 'export AWS_PROFILE=%q\n' "$AWS_PROFILE"
+    echo "AWS_PROFILE=$AWS_PROFILE" >&2
+    applied=1
+  fi
+  if [[ -n "$AWS_REGION" ]]; then
+    printf 'export AWS_REGION=%q\n' "$AWS_REGION"
+    echo "AWS_REGION=$AWS_REGION" >&2
+    applied=1
+  fi
+  # ${EXPORTS[@]+...}: bash 3.2(macOS 기본)의 set -u는 빈 배열 확장을 unbound로 취급
+  for kv in ${EXPORTS[@]+"${EXPORTS[@]}"}; do
+    [[ "$kv" =~ ^[A-Za-z_][A-Za-z0-9_]*= ]] ||
+      die "잘못된 EXPORTS 항목 (KEY=VALUE 형식): $kv"
+    key="${kv%%=*}"
+    val="${kv#*=}"
+    printf 'export %s=%q\n' "$key" "$val"
+    echo "$key=$val" >&2
+    applied=1
+  done
+  if [[ -n "$KUBE_CONTEXT" ]]; then
+    need_cmd kubectl "brew install kubectl"
+    kubectl config use-context "$KUBE_CONTEXT" >&2 ||
+      die "kubectl context 전환 실패: $KUBE_CONTEXT"
+    applied=1
+  fi
+  if [[ -n "$KUBE_NAMESPACE" ]]; then
+    need_cmd kubectl "brew install kubectl"
+    kubectl config set-context --current --namespace "$KUBE_NAMESPACE" >&2 ||
+      die "kubectl namespace 설정 실패: $KUBE_NAMESPACE"
+    echo "namespace=$KUBE_NAMESPACE" >&2
+    applied=1
+  fi
+
+  [[ "$applied" -eq 1 ]] || echo "적용할 항목이 없습니다 (프리셋이 비어 있음): $file" >&2
+  echo "✓ 프리셋 적용됨: $name" >&2
+}
+
+cmd_list() {
+  local names name file summary
+  names=$(_presets)
+  [[ -n "$names" ]] || { echo "프리셋이 없습니다: $WENV_DIR (wenv new <이름> 으로 생성)" >&2; exit 0; }
+  # eval 래퍼 경유 시에도 보이도록 stderr로 출력 (stdout은 export 문 전용)
+  while IFS= read -r name; do
+    file="$WENV_DIR/$name"
+    summary=$(grep -E '^(AWS_PROFILE|AWS_REGION|KUBE_CONTEXT|KUBE_NAMESPACE)=..*' "$file" 2>/dev/null |
+      tr '\n' ' ' || true)
+    printf '%-20s %s\n' "$name" "$summary" >&2
+  done <<<"$names"
+}
+
+cmd_current() {
+  {
+    echo "AWS_PROFILE:    ${AWS_PROFILE:-(미설정)}"
+    echo "AWS_REGION:     ${AWS_REGION:-(미설정)}"
+    if command -v kubectl >/dev/null 2>&1; then
+      echo "kube context:   $(kubectl config current-context 2>/dev/null || echo '(미설정)')"
+      echo "kube namespace: $(kubectl config view --minify -o jsonpath='{..namespace}' 2>/dev/null || true)"
+    fi
+  } >&2
+}
+
+cmd_new() {
+  local name="$1" file
+  [[ -n "$name" ]] || die "사용법: wenv new <이름>"
+  [[ "$name" =~ ^[A-Za-z0-9._-]+$ ]] || die "프리셋 이름은 영문/숫자/._- 만 가능합니다: $name"
+  case "$name" in
+    list|current|new|edit|rm) die "wenv 예약어라 사용할 수 없습니다: $name" ;;
+  esac
+  file="$WENV_DIR/$name"
+  [[ -e "$file" ]] && die "이미 존재합니다: $file"
+  mkdir -p "$WENV_DIR"
+  cat >"$file" <<'TEMPLATE'
+# wenv 프리셋 — 필요한 항목만 채우고 나머지는 비워두거나 지우세요.
+AWS_PROFILE=
+AWS_REGION=
+KUBE_CONTEXT=
+KUBE_NAMESPACE=
+# 추가 export (KEY=VALUE 배열)
+# EXPORTS=(FOO=bar)
+TEMPLATE
+  echo "✓ 생성됨: $file" >&2
+  _edit_file "$file"
+}
+
+cmd_edit() {
+  local name="${1:-}"
+  [[ -n "$name" ]] || name=$(_pick_preset)
+  [[ -n "$name" ]] || exit 0
+  [[ -f "$WENV_DIR/$name" ]] || die "프리셋이 없습니다: $name"
+  _edit_file "$WENV_DIR/$name"
+}
+
+cmd_rm() {
+  local name="${1:-}"
+  [[ -n "$name" ]] || name=$(_pick_preset)
+  [[ -n "$name" ]] || exit 0
+  [[ -f "$WENV_DIR/$name" ]] || die "프리셋이 없습니다: $name"
+  confirm "프리셋을 삭제할까요? ($name)" || { echo "취소했습니다." >&2; exit 0; }
+  rm "$WENV_DIR/$name"
+  echo "✓ 삭제됨: $name" >&2
+}
+
+case "${1:-}" in
+  -h|--help|help)
+    # eval 래퍼(wenv 함수) 경유 시 stdout이 캡처되므로 usage를 stderr로 (eval 대상이 비도록)
+    if [[ -t 1 ]]; then usage; else usage >&2; fi
+    exit 0
+    ;;
+  list)    cmd_list ;;
+  current) cmd_current ;;
+  new)     shift; cmd_new "${1:-}" ;;
+  edit)    shift; cmd_edit "${1:-}" ;;
+  rm)      shift; cmd_rm "${1:-}" ;;
+  "")
+    name=$(_pick_preset)
+    [[ -n "$name" ]] || exit 0
+    cmd_apply "$name"
+    ;;
+  *) cmd_apply "$1" ;;
+esac
