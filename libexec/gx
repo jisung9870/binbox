@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# gx — Git 작업 통합 명령 (br / log / root)
+# gx — Git 작업 통합 명령 (br / new / clean / log / root)
 set -euo pipefail
 
 _self=$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || echo "${BASH_SOURCE[0]}")
@@ -13,12 +13,18 @@ gx — Git 작업 통합 명령
 
 사용법:
   gx br [-a|--all] [브랜치]      # 브랜치 선택/전환
+  gx new [브랜치] [기준]         # 새 브랜치 생성 후 전환 (기준 기본: 현재 HEAD)
+  gx clean [--gone] [-f]         # 로컬 브랜치 정리 (fzf 다중 선택 후 삭제)
   gx log [git log 인자...]       # fzf 로그 탐색 후 선택한 커밋 해시 출력
   gx root [--cd]                 # 저장소 루트 경로 출력
 
 예시:
   gx br
   gx br -a
+  gx new feature/login
+  gx new hotfix main
+  gx clean                     # 삭제할 로컬 브랜치를 골라서 제거
+  gx clean --gone -f           # 원격에서 사라진 브랜치를 강제 삭제
   gx log -- path/to/file
   cd $(gx root)
   eval "$(gx root --cd)"
@@ -61,6 +67,104 @@ cmd_br() {
 
   if [[ -n "$selected" ]]; then
     git switch "$selected" 2>/dev/null || git switch -c "$selected" --track "origin/$selected"
+  fi
+}
+
+cmd_new() {
+  local name base
+  case "${1:-}" in
+    -h|--help|help) usage; exit 0 ;;
+  esac
+
+  need_cmd git
+
+  git rev-parse --git-dir >/dev/null 2>&1 || die "git 저장소 안에 있지 않습니다."
+
+  name="${1:-}"
+  base="${2:-}"
+
+  if [[ -z "$name" ]]; then
+    read -r -p "새 브랜치 이름: " name
+    [[ -n "$name" ]] || die "브랜치 이름이 필요합니다."
+  fi
+
+  if [[ -n "$base" ]]; then
+    git switch -c "$name" "$base"
+  else
+    git switch -c "$name"
+  fi
+}
+
+cmd_clean() {
+  local gone=0 force=0 current branches selected del_flag br failed=()
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -h|--help|help) usage; exit 0 ;;
+      --gone) gone=1; shift ;;
+      -f|--force) force=1; shift ;;
+      -*) die "알 수 없는 옵션: $1" ;;
+      *) die "알 수 없는 인자: $1" ;;
+    esac
+  done
+
+  need_cmd git
+
+  git rev-parse --git-dir >/dev/null 2>&1 || die "git 저장소 안에 있지 않습니다."
+
+  need_cmd fzf "brew install fzf"
+
+  current=$(git branch --show-current 2>/dev/null || true)
+
+  if ((gone)); then
+    # 추적하던 원격 브랜치가 사라진(삭제된) 로컬 브랜치만 후보로
+    branches=$(git for-each-ref --format='%(refname:short) %(upstream:track)' refs/heads |
+      awk '$2 == "[gone]" {print $1}')
+  else
+    branches=$(git branch --sort=-committerdate --format='%(refname:short)')
+  fi
+
+  # 현재 브랜치는 삭제 대상에서 제외
+  if [[ -n "$current" ]]; then
+    branches=$(printf '%s\n' "$branches" | grep -vxF "$current" || true)
+  fi
+
+  [[ -n "$branches" ]] || die "정리할 로컬 브랜치가 없습니다."
+
+  selected=$(printf '%s\n' "$branches" | fzf_pick \
+    --multi \
+    --prompt="삭제할 브랜치 선택 (Tab으로 다중 선택): " \
+    --header="현재: ${current:-detached} — 삭제할 브랜치를 고르세요" \
+    --preview="git log --oneline --decorate --color=always -15 {}" \
+    --preview-window=down:15:wrap)
+
+  [[ -n "$selected" ]] || { echo "선택 취소"; exit 0; }
+
+  echo "다음 브랜치를 삭제합니다:"
+  printf '%s\n' "$selected"
+  echo ""
+  confirm "계속하시겠습니까?" || { echo "취소됨"; exit 0; }
+
+  del_flag=-d
+  ((force)) && del_flag=-D
+
+  while read -r br; do
+    [[ -n "$br" ]] || continue
+    git branch "$del_flag" "$br" 2>/dev/null || failed+=("$br")
+  done < <(printf '%s\n' "$selected")
+
+  # -d로 지우지 못한(병합 안 된) 브랜치는 강제 삭제 여부를 한 번 더 확인
+  if ((${#failed[@]})); then
+    echo ""
+    echo "병합되지 않아 삭제하지 못한 브랜치:"
+    printf '  %s\n' "${failed[@]}"
+    if confirm "강제 삭제할까요? (git branch -D)"; then
+      for br in "${failed[@]}"; do
+        git branch -D "$br"
+      done
+    else
+      echo "강제 삭제를 건너뜁니다."
+      exit 1
+    fi
   fi
 }
 
@@ -113,6 +217,14 @@ case "${1:-}" in
   br|branch)
     shift
     cmd_br "$@"
+    ;;
+  new|create)
+    shift
+    cmd_new "$@"
+    ;;
+  clean|prune)
+    shift
+    cmd_clean "$@"
     ;;
   log)
     shift

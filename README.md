@@ -105,11 +105,17 @@ agents                  # agent pane 선택 후 이동 (--list, --usage)
 | 명령어 | 설명 |
 |--------|------|
 | `gx br` | fzf 브랜치 전환 (최근 커밋 순, `-a`로 원격 포함) |
+| `gx new` | 새 브랜치 생성 후 전환 (`gx new <이름> [기준]`, 기준 기본: 현재 HEAD) |
+| `gx clean` | 로컬 브랜치 정리 — fzf 다중 선택 후 삭제 (`--gone` 원격 삭제분만, `-f` 강제) |
 | `gx log` | fzf 커밋 탐색, Enter로 해시 출력 (다른 명령과 조합) |
 | `gx root` | 저장소 루트 경로 출력 (`--cd`로 eval 이동) |
 
 ```bash
 gx br                        # 브랜치 선택 (preview: 최근 로그)
+gx new feature/login         # 새 브랜치 생성 후 전환
+gx new hotfix main           # main 기준으로 새 브랜치 생성
+gx clean                     # 삭제할 로컬 브랜치를 골라서 제거
+gx clean --gone -f           # 원격에서 사라진 브랜치를 강제 삭제
 gx log                       # 커밋 탐색 (preview: diff)
 git rebase -i $(gx log)^     # 선택 커밋부터 rebase
 cd $(gx root)                # 저장소 루트로 이동

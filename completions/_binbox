@@ -117,6 +117,8 @@ _binbox() {
       if (( CURRENT == 2 )); then
         local -a subs=(
           'br:브랜치 선택/전환'
+          'new:새 브랜치 생성/전환'
+          'clean:로컬 브랜치 정리(삭제)'
           'log:커밋 로그 탐색'
           'root:저장소 루트 출력'
         )
@@ -127,6 +129,16 @@ _binbox() {
             _arguments \
               '(-a --all)'{-a,--all}'[원격 브랜치 포함]' \
               '1:브랜치:_binbox_git_branches'
+            ;;
+          new)
+            _arguments \
+              '1:새 브랜치:' \
+              '2:기준 브랜치:_binbox_git_branches'
+            ;;
+          clean)
+            _arguments \
+              '--gone[원격에서 삭제된 브랜치만 대상]' \
+              '(-f --force)'{-f,--force}'[병합 안 된 브랜치도 강제 삭제]'
             ;;
           log) _files ;;
           root) _arguments '--cd[eval 가능한 cd 명령 출력]' ;;
