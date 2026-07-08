@@ -82,7 +82,9 @@ _go_record_recent() {
     printf '%s\n' "$selected_path"
     if [[ -f "$RECENT_FILE" ]]; then
       { grep -Fxv "$selected_path" "$RECENT_FILE" || true; } | while IFS= read -r recent; do
-        [[ -d "$recent" ]] && printf '%s\n' "$recent"
+        # if 사용 필수: `[[ ]] && printf`는 마지막 항목이 없는 경로면 1을 반환,
+        # pipefail+set -e에서 파이프라인 전체를 실패시켜 세션 생성이 중단된다.
+        if [[ -d "$recent" ]]; then printf '%s\n' "$recent"; fi
       done
     fi
   } | awk 'NF && !seen[$0]++ {print}' | head -50 >"${RECENT_FILE}.tmp"

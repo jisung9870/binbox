@@ -177,6 +177,27 @@ esac
   grep -q "new-session -s projA -c $STUB_DIR/parent/projA" "$STUB_DIR/tmux.calls"
 }
 
+@test "tm go: stale recent entries do not abort session creation" {
+  # 회귀: recent 파일의 마지막 항목이 없는 경로면 _go_record_recent의
+  # `[[ -d ]] && printf`가 1을 반환 → pipefail+set -e로 세션 생성이 통째로 중단됐다.
+  mkdir -p "$STUB_DIR/parent/projA" "$(dirname "$DIRS_FILE")"
+  echo "$STUB_DIR/parent" > "$DIRS_FILE"
+  mkdir -p "$XDG_STATE_HOME/tmux-sessionizer"
+  {
+    echo "$STUB_DIR/parent/projA"
+    echo "$STUB_DIR/gone1"
+    echo "$STUB_DIR/gone2"
+  } > "$XDG_STATE_HOME/tmux-sessionizer/recent"
+  make_stub tmux "printf '%s\n' \"\$*\" >> '$STUB_DIR/tmux.calls'"
+  make_stub fzf "tee '$STUB_DIR/fzf.in' | awk 'NR==1'"
+  make_stub pgrep 'exit 1'
+  run env -u TMUX "$BINBOX_DIR/libexec/tm" go
+  [ "$status" -eq 0 ]
+  grep -q "new-session -s projA -c $STUB_DIR/parent/projA" "$STUB_DIR/tmux.calls"
+  # recent은 정리되어 없는 경로가 사라진다
+  ! grep -q gone1 "$XDG_STATE_HOME/tmux-sessionizer/recent"
+}
+
 @test "tm go: fzf cancel exits 0 without session" {
   mkdir -p "$STUB_DIR/parent/projA" "$(dirname "$DIRS_FILE")"
   echo "$STUB_DIR/parent" > "$DIRS_FILE"
