@@ -323,14 +323,26 @@ _resolve_profile() {
   _write_cache "$profile"
 }
 
+# epoch(초) → ISO 8601 UTC. botocore(EnvProvider)는 AWS_CREDENTIAL_EXPIRATION을
+# ISO 8601로 파싱하므로 epoch 정수를 그대로 주면 "year ... out of range"로 실패한다.
+_epoch_to_iso8601() {
+  local epoch="$1"
+  [[ "$epoch" =~ ^[0-9]+$ ]] || return 1
+  date -u -r "$epoch" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null ||
+    date -u -d "@$epoch" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null
+}
+
 _emit_exports() {
-  local profile="$1"
+  local profile="$1" expiration_iso
+  expiration_iso=$(_epoch_to_iso8601 "$RES_AWS_EXPIRATION" || true)
   printf 'unset AWS_PROFILE\n'
   printf 'export AWS_ACCESS_KEY_ID=%q\n' "$RES_AWS_ACCESS_KEY_ID"
   printf 'export AWS_SECRET_ACCESS_KEY=%q\n' "$RES_AWS_SECRET_ACCESS_KEY"
   printf 'export AWS_SESSION_TOKEN=%q\n' "$RES_AWS_SESSION_TOKEN"
-  printf 'export AWS_SESSION_EXPIRATION=%q\n' "$RES_AWS_EXPIRATION"
-  printf 'export AWS_CREDENTIAL_EXPIRATION=%q\n' "$RES_AWS_EXPIRATION"
+  if [[ -n "$expiration_iso" ]]; then
+    printf 'export AWS_SESSION_EXPIRATION=%q\n' "$expiration_iso"
+    printf 'export AWS_CREDENTIAL_EXPIRATION=%q\n' "$expiration_iso"
+  fi
   printf 'export BINBOX_ASSUME_PROFILE=%q\n' "$profile"
   if [[ -n "$RES_AWS_REGION" ]]; then
     printf 'export AWS_REGION=%q\n' "$RES_AWS_REGION"
@@ -366,23 +378,27 @@ cmd_current() {
 }
 
 cmd_exec() {
-  local profile="${1:-}"
+  local profile="${1:-}" expiration_iso
   [[ -n "$profile" ]] || die "사용법: assume exec <profile> -- <cmd...>"
   shift
   [[ "${1:-}" == "--" ]] || die "사용법: assume exec <profile> -- <cmd...>"
   shift
   [[ $# -gt 0 ]] || die "실행할 명령을 지정하세요."
   _resolve_profile "$profile"
-  AWS_ACCESS_KEY_ID="$RES_AWS_ACCESS_KEY_ID" \
-    AWS_SECRET_ACCESS_KEY="$RES_AWS_SECRET_ACCESS_KEY" \
-    AWS_SESSION_TOKEN="$RES_AWS_SESSION_TOKEN" \
-    AWS_REGION="$RES_AWS_REGION" \
-    AWS_DEFAULT_REGION="$RES_AWS_REGION" \
-    AWS_SESSION_EXPIRATION="$RES_AWS_EXPIRATION" \
-    AWS_CREDENTIAL_EXPIRATION="$RES_AWS_EXPIRATION" \
-    BINBOX_ASSUME_PROFILE="$profile" \
-    AWS_PROFILE='' \
-    exec "$@"
+  expiration_iso=$(_epoch_to_iso8601 "$RES_AWS_EXPIRATION" || true)
+  local -a env_kv=(
+    AWS_ACCESS_KEY_ID="$RES_AWS_ACCESS_KEY_ID"
+    AWS_SECRET_ACCESS_KEY="$RES_AWS_SECRET_ACCESS_KEY"
+    AWS_SESSION_TOKEN="$RES_AWS_SESSION_TOKEN"
+    AWS_REGION="$RES_AWS_REGION"
+    AWS_DEFAULT_REGION="$RES_AWS_REGION"
+    BINBOX_ASSUME_PROFILE="$profile"
+  )
+  [[ -n "$expiration_iso" ]] && env_kv+=(
+    AWS_SESSION_EXPIRATION="$expiration_iso"
+    AWS_CREDENTIAL_EXPIRATION="$expiration_iso"
+  )
+  exec env -u AWS_PROFILE "${env_kv[@]}" "$@"
 }
 
 while [[ $# -gt 0 ]]; do

@@ -125,6 +125,26 @@ esac
   grep -q "sso get-role-credentials" "$STUB_DIR/aws.calls"
 }
 
+@test "assume sso profile: AWS_CREDENTIAL_EXPIRATION is ISO 8601, not epoch" {
+  write_config \
+    '[profile dev]' \
+    'sso_session = corp' \
+    'sso_account_id = 123456789012' \
+    'sso_role_name = Admin' \
+    'region = ap-northeast-2' \
+    '[sso-session corp]' \
+    'sso_start_url = https://example.awsapps.com/start' \
+    'sso_region = ap-northeast-2'
+  write_sso_token
+  stub_aws_sso
+
+  run bash -c "'$ASSUME' dev 2>/dev/null"
+  [ "$status" -eq 0 ]
+  # botocore(EnvProvider)는 ISO 8601만 파싱한다. epoch 정수면 boto3 인증이 깨진다.
+  [[ "$output" =~ export\ AWS_CREDENTIAL_EXPIRATION=[0-9]{4}-[0-9]{2}-[0-9]{2}T ]]
+  [[ ! "$output" =~ AWS_CREDENTIAL_EXPIRATION=[0-9]+$ ]]
+}
+
 @test "assume cache hit: skips aws calls" {
   mkdir -p "$BINBOX_ASSUME_CACHE_DIR"
   cat > "$BINBOX_ASSUME_CACHE_DIR/dev.json" <<JSON
