@@ -67,6 +67,27 @@ write_session() {
 
 # --- plan ---
 
+@test "tfx init: runs terraform init with passthrough args" {
+  stub_terraform_calls
+  run "$TFX" init -upgrade
+  [ "$status" -eq 0 ]
+  grep -q "init -upgrade" "$STUB_DIR/terraform.calls"
+}
+
+@test "tfx validate: runs terraform validate with passthrough args" {
+  stub_terraform_calls
+  run "$TFX" validate -no-color
+  [ "$status" -eq 0 ]
+  grep -q "validate -no-color" "$STUB_DIR/terraform.calls"
+}
+
+@test "tfx fmt: runs terraform fmt with passthrough args" {
+  stub_terraform_calls
+  run "$TFX" fmt -recursive
+  [ "$status" -eq 0 ]
+  grep -q "fmt -recursive" "$STUB_DIR/terraform.calls"
+}
+
 @test "tfx plan: runs terraform plan -out with passthrough args" {
   stub_terraform_calls
   make_stub aws 'exit 1' # 배너 생략 경로
@@ -173,7 +194,7 @@ write_session() {
   stub_terraform_calls
   write_session 600 123456789012
   touch "$STUB_DIR/plan.out"
-  run env TFPLAN_FILE="$STUB_DIR/plan.out" "$TFX" apply
+  run bash -c "printf 'y' | env TFPLAN_FILE='$STUB_DIR/plan.out' '$TFX' apply"
   [ "$status" -eq 0 ]
   grep -q "apply $STUB_DIR/plan.out" "$STUB_DIR/terraform.calls"
 }
@@ -183,9 +204,20 @@ write_session() {
   stub_terraform_calls
   write_session 600 123456789012
   touch "$STUB_DIR/plan.out"
-  run env TFPLAN_FILE="$STUB_DIR/plan.out" "$TFX" apply -no-color
+  run bash -c "printf 'y' | env TFPLAN_FILE='$STUB_DIR/plan.out' '$TFX' apply -no-color"
   [ "$status" -eq 0 ]
   grep -q "apply -no-color $STUB_DIR/plan.out" "$STUB_DIR/terraform.calls"
+}
+
+@test "tfx apply: n cancels before applying plan file" {
+  stub_aws
+  stub_terraform_calls
+  write_session 600 123456789012
+  touch "$STUB_DIR/plan.out"
+  run bash -c "printf 'n' | env TFPLAN_FILE='$STUB_DIR/plan.out' '$TFX' apply"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"취소했습니다"* ]]
+  ! grep -q "apply $STUB_DIR/plan.out" "$STUB_DIR/terraform.calls" 2>/dev/null
 }
 
 @test "tfx apply: expired session refuses and removes session file" {
@@ -217,6 +249,77 @@ write_session() {
   run env TFPLAN_FILE="$STUB_DIR/no-such-plan" "$TFX" apply
   [ "$status" -eq 1 ]
   [[ "$output" == *"plan file not found"* ]]
+}
+
+@test "tfx destroy: no session refuses to destroy" {
+  stub_aws
+  stub_terraform_calls
+  run "$TFX" destroy
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"세션이 없습니다"* ]]
+  [ ! -f "$STUB_DIR/terraform.calls" ]
+}
+
+@test "tfx destroy: valid session creates destroy plan then applies it" {
+  stub_aws
+  stub_terraform_calls
+  write_session 600 123456789012
+  run bash -c "printf 'y' | '$TFX' destroy -var-file=qa.tfvars"
+  [ "$status" -eq 0 ]
+  grep -q "plan -destroy -out=tfdestroyplan -var-file=qa.tfvars" "$STUB_DIR/terraform.calls"
+  grep -q "apply tfdestroyplan" "$STUB_DIR/terraform.calls"
+}
+
+@test "tfx destroy: n cancels after creating destroy plan" {
+  stub_aws
+  stub_terraform_calls
+  write_session 600 123456789012
+  run bash -c "printf 'n' | '$TFX' destroy -var-file=qa.tfvars"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"취소했습니다"* ]]
+  grep -q "plan -destroy -out=tfdestroyplan -var-file=qa.tfvars" "$STUB_DIR/terraform.calls"
+  ! grep -q "apply tfdestroyplan" "$STUB_DIR/terraform.calls" 2>/dev/null
+}
+
+@test "tfx destroy: respects TFDESTROY_PLAN_FILE env var" {
+  stub_aws
+  stub_terraform_calls
+  write_session 600 123456789012
+  run bash -c "printf 'y' | env TFDESTROY_PLAN_FILE='$STUB_DIR/destroy.out' '$TFX' destroy"
+  [ "$status" -eq 0 ]
+  grep -q "plan -destroy -out=$STUB_DIR/destroy.out" "$STUB_DIR/terraform.calls"
+  grep -q "apply $STUB_DIR/destroy.out" "$STUB_DIR/terraform.calls"
+}
+
+@test "tfx destroy: expired session refuses and removes session file" {
+  stub_aws
+  stub_terraform_calls
+  write_session -10 123456789012
+  run "$TFX" destroy
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"만료"* ]]
+  [ ! -f "$SESSION_FILE" ]
+  [ ! -f "$STUB_DIR/terraform.calls" ]
+}
+
+@test "tfx destroy: account mismatch refuses" {
+  stub_aws
+  stub_terraform_calls
+  write_session 600 999999999999
+  run "$TFX" destroy
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"다릅니다"* ]]
+  ! grep -q destroy "$STUB_DIR/terraform.calls" 2>/dev/null
+}
+
+@test "tfx destroy: rejects auto approve" {
+  stub_aws
+  stub_terraform_calls
+  write_session 600 123456789012
+  run "$TFX" destroy -auto-approve
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"-auto-approve"* ]]
+  ! grep -q destroy "$STUB_DIR/terraform.calls" 2>/dev/null
 }
 
 @test "tfx status: reports valid / missing session" {

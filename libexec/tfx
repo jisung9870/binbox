@@ -11,16 +11,21 @@ source "$BINBOX_DIR/lib/common.sh" || { echo "lib/common.sh not found" >&2; exit
 SESSION_FILE="${XDG_STATE_HOME:-$HOME/.local/state}/binbox/tfsession"
 DEFAULT_MINUTES=15
 PLAN_FILE="${TFPLAN_FILE:-tfplan}"
+DESTROY_PLAN_FILE="${TFDESTROY_PLAN_FILE:-tfdestroyplan}"
 
 usage() {
   cat <<'EOF'
 tfx — terraform 워크플로우 통합 명령
 
 사용법:
+  tfx init [인자...]      # terraform init (backend/module 초기화, 인자 패스스루)
+  tfx validate [인자...]  # terraform validate (인자 패스스루)
+  tfx fmt [인자...]       # terraform fmt (인자 패스스루)
   tfx plan [인자...]      # terraform plan -out=<planfile> (인자 패스스루, AWS 계정 배너)
   tfx sum [모드] [파일]    # plan 요약 (tf-summarize): tree / stree / draw / md / json
   tfx session [분]        # apply 세션 시작 — AWS 계정 확인 후 N분 유효 (기본 15분)
-  tfx apply [인자...]     # 세션 유효 시 terraform apply <planfile>
+  tfx apply [인자...]     # 세션 유효 + y/n 확인 후 terraform apply <planfile>
+  tfx destroy [인자...]   # destroy plan 생성 + y/n 확인 후 terraform apply <destroy-planfile>
   tfx status              # 세션 상태 (유효하면 0, 없음/만료면 1)
   tfx end                 # 세션 즉시 종료
   tfx state               # fzf state 탐색 (preview: state show) → 선택 주소 출력 (조합용)
@@ -31,16 +36,21 @@ tfx — terraform 워크플로우 통합 명령
 
 Planfile:
   기본값은 ./tfplan. 환경변수 TFPLAN_FILE로 지정 가능. (plan/sum/apply 공유)
+  destroy plan 기본값은 ./tfdestroyplan. 환경변수 TFDESTROY_PLAN_FILE로 지정 가능.
 
 동작:
-  - plan 파일 apply는 terraform의 yes 확인이 생략되므로 apply 세션이 그 역할을 대신한다.
+  - plan 파일 apply는 terraform의 yes 확인이 생략되므로 tfx가 별도 y/n 확인을 추가한다.
   - 세션은 시작 시점의 AWS 계정(STS 기준)에 묶인다. apply 시점에 계정이 다르면 거부.
   - 세션 시작 시 Account ID 뒷 4자리를 직접 입력해야 한다 (무의식적 y 연타 방지).
+  - destroy는 먼저 destroy plan을 저장한 뒤, y/n 확인 후 해당 plan 파일을 apply한다.
 
 예시:
+  tfx init
+  tfx validate && tfx fmt -recursive
   tfx plan && tfx sum tree
   tfx sum md plan-summary.md
   tfx session 15 && tfx apply
+  tfx session 15 && tfx destroy
   terraform taint "$(tfx state)"
 EOF
 }
@@ -58,12 +68,27 @@ _aws_banner() {
 
 # --- plan (구 tfplan) ---
 
+cmd_init() {
+  need_cmd terraform "brew install terraform"
+  terraform init "$@"
+}
+
+cmd_validate() {
+  need_cmd terraform "brew install terraform"
+  terraform validate "$@"
+}
+
+cmd_fmt() {
+  need_cmd terraform "brew install terraform"
+  terraform fmt "$@"
+}
+
 cmd_plan() {
   need_cmd terraform "brew install terraform"
   _aws_banner
   terraform plan -out="$PLAN_FILE" "$@"
   echo
-  echo "✔ saved: $PLAN_FILE   (run: tfx sum [tree|stree|draw|md|json], apply: tfx apply)"
+  echo "✔ saved: $PLAN_FILE   (next: tfx sum [tree|stree|draw|md|json], apply: tfx apply; init: tfx init)"
 }
 
 # --- sum (구 tfsum) ---
@@ -224,7 +249,45 @@ cmd_apply() {
   echo "세션:        약 ${session_left}분 남음"
   echo
   echo "→ terraform apply $PLAN_FILE"
+  confirm "plan file을 apply할까요? ($PLAN_FILE)" || { echo "취소했습니다."; exit 0; }
   exec terraform apply "$@" "$PLAN_FILE"
+}
+
+cmd_destroy() {
+  need_cmd terraform "brew install terraform"
+  need_cmd aws "brew install awscli"
+  local arg
+  for arg in "$@"; do
+    case "$arg" in
+      -auto-approve|-auto-approve=*)
+        die "tfx destroy에서는 -auto-approve를 사용할 수 없습니다." \
+          "Terraform의 최종 destroy 확인을 유지하세요."
+        ;;
+    esac
+  done
+  _session_check
+
+  local ident account arn
+  ident=$(_identity) ||
+    die "AWS 자격 증명을 확인할 수 없습니다." "assume <profile> 또는 AWS_PROFILE/SSO 로그인 상태를 확인하세요."
+  account=$(printf '%s' "$ident" | cut -f1)
+  arn=$(printf '%s' "$ident" | cut -f2)
+
+  if [[ "$account" != "$session_account" ]]; then
+    die "세션 계정($session_account)과 현재 계정($account)이 다릅니다." \
+      "profile을 바꿨다면 세션을 다시 시작하세요: tfx session"
+  fi
+
+  _show_identity "$account" "$arn"
+  echo "세션:        약 ${session_left}분 남음"
+  echo
+  echo "→ terraform plan -destroy -out=$DESTROY_PLAN_FILE $*"
+  terraform plan -destroy -out="$DESTROY_PLAN_FILE" "$@"
+  echo
+  echo "✔ saved: $DESTROY_PLAN_FILE"
+  confirm "destroy plan을 apply할까요? ($DESTROY_PLAN_FILE)" || { echo "취소했습니다."; exit 0; }
+  echo "→ terraform apply $DESTROY_PLAN_FILE"
+  exec terraform apply "$DESTROY_PLAN_FILE"
 }
 
 # --- state (신규) ---
@@ -309,10 +372,14 @@ cmd_state() {
 
 case "${1:-}" in
   ""|-h|--help|help) usage; exit 0 ;;
+  init)    shift; cmd_init "$@" ;;
+  validate) shift; cmd_validate "$@" ;;
+  fmt)     shift; cmd_fmt "$@" ;;
   plan)    shift; cmd_plan "$@" ;;
   sum)     shift; cmd_sum "$@" ;;
   session) shift; cmd_session "$@" ;;
   apply)   shift; cmd_apply "$@" ;;
+  destroy) shift; cmd_destroy "$@" ;;
   status)  cmd_status ;;
   end)     rm -f "$SESSION_FILE"; echo "세션 종료됨" ;;
   state)   shift; cmd_state "$@" ;;

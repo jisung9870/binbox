@@ -191,6 +191,24 @@ run_setup() { # run_setup <SHELL값> [추가 인자...]
   [[ "$output" == *"status=42"* ]]
 }
 
+@test "init.bash: terraform guard blocks raw apply/destroy and allows escape hatches" {
+  fakebin=$(mktemp -d)
+  printf '#!/usr/bin/env bash\necho "bb:$*"\n' > "$fakebin/bb"
+  printf '#!/usr/bin/env bash\necho "terraform:$*"\n' > "$fakebin/terraform"
+  chmod +x "$fakebin/bb" "$fakebin/terraform"
+  run bash --norc -c "export HOME=$fakebin/h PATH=$fakebin:\$PATH; source '$BINBOX_DIR/shell/init.bash'; terraform apply; echo apply_status=\$?; terraform destroy; echo destroy_status=\$?; terraform -chdir=foo apply; echo chdir_status=\$?; terraform plan; BINBOX_ALLOW_RAW_TERRAFORM=1 terraform apply; BINBOX_TERRAFORM_GUARD=0 terraform destroy"
+  rm -rf "$fakebin"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"raw terraform apply"* ]]
+  [[ "$output" == *"raw terraform destroy"* ]]
+  [[ "$output" == *"apply_status=2"* ]]
+  [[ "$output" == *"destroy_status=2"* ]]
+  [[ "$output" == *"chdir_status=2"* ]]
+  [[ "$output" == *"terraform:plan"* ]]
+  [[ "$output" == *"terraform:apply"* ]]
+  [[ "$output" == *"terraform:destroy"* ]]
+}
+
 @test "init.zsh: restores aliases and wraps bb as function" {
   command -v zsh >/dev/null || skip "zsh not installed"
   run zsh -f -c "source '$BINBOX_DIR/shell/init.zsh'; alias tm; alias wenv; alias assume 2>/dev/null || true; alias awsp 2>/dev/null || true; whence -w bb"
@@ -211,6 +229,25 @@ run_setup() { # run_setup <SHELL값> [추가 인자...]
   rm -rf "$fakebin"
   [ "$status" -eq 0 ]
   [[ "$output" == *"status=42"* ]]
+}
+
+@test "init.zsh: terraform guard blocks raw apply/destroy and allows escape hatches" {
+  command -v zsh >/dev/null || skip "zsh not installed"
+  fakebin=$(mktemp -d)
+  printf '#!/usr/bin/env bash\necho "bb:$*"\n' > "$fakebin/bb"
+  printf '#!/usr/bin/env bash\necho "terraform:$*"\n' > "$fakebin/terraform"
+  chmod +x "$fakebin/bb" "$fakebin/terraform"
+  run zsh -f -c "export HOME=$fakebin/h PATH=$fakebin:\$PATH; source '$BINBOX_DIR/shell/init.zsh'; terraform apply; echo apply_status=\$?; terraform destroy; echo destroy_status=\$?; terraform -chdir=foo apply; echo chdir_status=\$?; terraform plan; BINBOX_ALLOW_RAW_TERRAFORM=1 terraform apply; BINBOX_TERRAFORM_GUARD=0 terraform destroy"
+  rm -rf "$fakebin"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"raw terraform apply"* ]]
+  [[ "$output" == *"raw terraform destroy"* ]]
+  [[ "$output" == *"apply_status=2"* ]]
+  [[ "$output" == *"destroy_status=2"* ]]
+  [[ "$output" == *"chdir_status=2"* ]]
+  [[ "$output" == *"terraform:plan"* ]]
+  [[ "$output" == *"terraform:apply"* ]]
+  [[ "$output" == *"terraform:destroy"* ]]
 }
 
 @test "init.zsh: double sourcing is guarded" {

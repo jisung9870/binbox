@@ -56,7 +56,51 @@ bb() {
   esac
 }
 
-# 3) bb 자동완성 (완성 시점에 bb list 호출 — 도구 추가 자동 반영)
+# 3) raw terraform apply/destroy 실수 방지 guard
+_binbox_terraform_guard_subcmd() {
+  local arg skip_next=0
+  for arg in "$@"; do
+    if [ "$skip_next" -eq 1 ]; then
+      skip_next=0
+      continue
+    fi
+    case "$arg" in
+      -chdir)
+        skip_next=1
+        ;;
+      -chdir=*)
+        ;;
+      -*)
+        ;;
+      *)
+        printf '%s\n' "$arg"
+        return 0
+        ;;
+    esac
+  done
+  return 1
+}
+
+terraform() {
+  if [ "${BINBOX_TERRAFORM_GUARD:-1}" != "0" ] && [ "${BINBOX_ALLOW_RAW_TERRAFORM:-0}" != "1" ]; then
+    local _binbox_tf_subcmd
+    _binbox_tf_subcmd=$(_binbox_terraform_guard_subcmd "$@" || true)
+    case "$_binbox_tf_subcmd" in
+      apply|destroy)
+        {
+          echo "✗ raw terraform $_binbox_tf_subcmd는 binbox guard가 막았습니다."
+          echo "  사용: bb tfx session && bb tfx $_binbox_tf_subcmd"
+          echo "  직접 실행: BINBOX_ALLOW_RAW_TERRAFORM=1 terraform $_binbox_tf_subcmd ..."
+          echo "  guard 끄기: BINBOX_TERRAFORM_GUARD=0"
+        } >&2
+        return 2
+        ;;
+    esac
+  fi
+  command terraform "$@"
+}
+
+# 4) bb 자동완성 (완성 시점에 bb list 호출 — 도구 추가 자동 반영)
 _bb_complete() {
   local cur=${COMP_WORDS[COMP_CWORD]}
   if [ "$COMP_CWORD" -eq 1 ]; then

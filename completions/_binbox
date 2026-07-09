@@ -148,10 +148,14 @@ _binbox() {
     tfx)
       if (( CURRENT == 2 )); then
         local -a subs=(
+          'init:terraform init'
+          'validate:terraform validate'
+          'fmt:terraform fmt'
           'plan:terraform plan -out=<planfile>'
           'sum:plan 요약 (tf-summarize)'
           'session:apply 세션 시작 (계정 확인)'
-          'apply:세션 유효 시 terraform apply'
+          'apply:세션 유효 + y/n 확인 후 terraform apply'
+          'destroy:destroy plan 생성 + y/n 확인 후 apply'
           'status:세션 상태'
           'end:세션 종료'
           'state:state 탐색/조작 (fzf)'
