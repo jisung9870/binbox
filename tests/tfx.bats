@@ -43,9 +43,9 @@ esac
 }
 
 write_session() {
-  # write_session <오프셋(초)> <계정>
+  # write_session <오프셋(초)> <계정> [scope=apply]
   mkdir -p "$(dirname "$SESSION_FILE")"
-  printf '%s\t%s\n' "$(( $(date +%s) + $1 ))" "$2" > "$SESSION_FILE"
+  printf '%s\t%s\t%s\n' "$(( $(date +%s) + $1 ))" "$2" "${3:-apply}" > "$SESSION_FILE"
 }
 
 # --- dispatch ---
@@ -189,6 +189,29 @@ write_session() {
   [ ! -f "$SESSION_FILE" ]
 }
 
+@test "tfx session: default scope is apply" {
+  stub_aws
+  run bash -c "printf '9012\n' | '$TFX' session 5"
+  [ "$status" -eq 0 ]
+  [ "$(cut -f3 "$SESSION_FILE")" = "apply" ]
+}
+
+@test "tfx session -d: starts destroy-scoped session" {
+  stub_aws
+  run bash -c "printf '9012\n' | '$TFX' session -d 5"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"세션 시작됨"* ]]
+  [[ "$output" == *"destroy"* ]]
+  [ "$(cut -f3 "$SESSION_FILE")" = "destroy" ]
+}
+
+@test "tfx session --destroy: minutes after flag also parses" {
+  stub_aws
+  run bash -c "printf '9012\n' | '$TFX' session --destroy 5"
+  [ "$status" -eq 0 ]
+  [ "$(cut -f3 "$SESSION_FILE")" = "destroy" ]
+}
+
 @test "tfx apply: valid session applies plan file" {
   stub_aws
   stub_terraform_calls
@@ -260,10 +283,42 @@ write_session() {
   [ ! -f "$STUB_DIR/terraform.calls" ]
 }
 
+@test "tfx destroy: apply-only session refuses destroy" {
+  stub_aws
+  stub_terraform_calls
+  write_session 600 123456789012 apply
+  run "$TFX" destroy
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"apply 전용"* ]]
+  [[ "$output" == *"tfx session -d"* ]]
+  [ ! -f "$STUB_DIR/terraform.calls" ]
+}
+
+@test "tfx destroy: legacy 2-field session (no scope) refuses destroy" {
+  stub_aws
+  stub_terraform_calls
+  mkdir -p "$(dirname "$SESSION_FILE")"
+  printf '%s\t%s\n' "$(( $(date +%s) + 600 ))" 123456789012 > "$SESSION_FILE"
+  run "$TFX" destroy
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"apply 전용"* ]]
+  [ ! -f "$STUB_DIR/terraform.calls" ]
+}
+
+@test "tfx apply: destroy-scoped session still allows apply" {
+  stub_aws
+  stub_terraform_calls
+  write_session 600 123456789012 destroy
+  touch "$STUB_DIR/plan.out"
+  run bash -c "printf 'y' | env TFPLAN_FILE='$STUB_DIR/plan.out' '$TFX' apply"
+  [ "$status" -eq 0 ]
+  grep -q "apply $STUB_DIR/plan.out" "$STUB_DIR/terraform.calls"
+}
+
 @test "tfx destroy: valid session creates destroy plan then applies it" {
   stub_aws
   stub_terraform_calls
-  write_session 600 123456789012
+  write_session 600 123456789012 destroy
   run bash -c "printf 'y' | '$TFX' destroy -var-file=qa.tfvars"
   [ "$status" -eq 0 ]
   grep -q "plan -destroy -out=tfdestroyplan -var-file=qa.tfvars" "$STUB_DIR/terraform.calls"
@@ -273,7 +328,7 @@ write_session() {
 @test "tfx destroy: n cancels after creating destroy plan" {
   stub_aws
   stub_terraform_calls
-  write_session 600 123456789012
+  write_session 600 123456789012 destroy
   run bash -c "printf 'n' | '$TFX' destroy -var-file=qa.tfvars"
   [ "$status" -eq 0 ]
   [[ "$output" == *"취소했습니다"* ]]
@@ -284,7 +339,7 @@ write_session() {
 @test "tfx destroy: respects TFDESTROY_PLAN_FILE env var" {
   stub_aws
   stub_terraform_calls
-  write_session 600 123456789012
+  write_session 600 123456789012 destroy
   run bash -c "printf 'y' | env TFDESTROY_PLAN_FILE='$STUB_DIR/destroy.out' '$TFX' destroy"
   [ "$status" -eq 0 ]
   grep -q "plan -destroy -out=$STUB_DIR/destroy.out" "$STUB_DIR/terraform.calls"
@@ -305,7 +360,7 @@ write_session() {
 @test "tfx destroy: account mismatch refuses" {
   stub_aws
   stub_terraform_calls
-  write_session 600 999999999999
+  write_session 600 999999999999 destroy
   run "$TFX" destroy
   [ "$status" -eq 1 ]
   [[ "$output" == *"다릅니다"* ]]

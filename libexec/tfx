@@ -23,9 +23,10 @@ tfx — terraform 워크플로우 통합 명령
   tfx fmt [인자...]       # terraform fmt (인자 패스스루)
   tfx plan [인자...]      # terraform plan -out=<planfile> (인자 패스스루, AWS 계정 배너)
   tfx sum [모드] [파일]    # plan 요약 (tf-summarize): tree / stree / draw / md / json
-  tfx session [분]        # apply 세션 시작 — AWS 계정 확인 후 N분 유효 (기본 15분)
+  tfx session [분] [-d]   # 세션 시작 — AWS 계정 확인 후 N분 유효 (기본 15분)
+                          #   기본은 apply만 허용, -d/--destroy 지정 시 destroy도 허용
   tfx apply [인자...]     # 세션 유효 + y/n 확인 후 terraform apply <planfile>
-  tfx destroy [인자...]   # destroy plan 생성 + y/n 확인 후 terraform apply <destroy-planfile>
+  tfx destroy [인자...]   # destroy 세션에서만: destroy plan 생성 + y/n 확인 후 apply
   tfx status              # 세션 상태 (유효하면 0, 없음/만료면 1)
   tfx end                 # 세션 즉시 종료
   tfx state               # fzf state 탐색 (preview: state show) → 선택 주소 출력 (조합용)
@@ -42,6 +43,7 @@ Planfile:
   - plan 파일 apply는 terraform의 yes 확인이 생략되므로 tfx가 별도 y/n 확인을 추가한다.
   - 세션은 시작 시점의 AWS 계정(STS 기준)에 묶인다. apply 시점에 계정이 다르면 거부.
   - 세션 시작 시 Account ID 뒷 4자리를 직접 입력해야 한다 (무의식적 y 연타 방지).
+  - destroy는 destroy 세션(tfx session -d)에서만 가능하다. 일반 세션은 apply만 허용한다.
   - destroy는 먼저 destroy plan을 저장한 뒤, y/n 확인 후 해당 plan 파일을 apply한다.
 
 예시:
@@ -50,7 +52,7 @@ Planfile:
   tfx plan && tfx sum tree
   tfx sum md plan-summary.md
   tfx session 15 && tfx apply
-  tfx session 15 && tfx destroy
+  tfx session 15 -d && tfx destroy
   terraform taint "$(tfx state)"
 EOF
 }
@@ -181,6 +183,8 @@ _session_check() {
   local expires now
   expires=$(cut -f1 "$SESSION_FILE")
   session_account=$(cut -f2 "$SESSION_FILE")
+  session_scope=$(cut -f3 "$SESSION_FILE")
+  [[ -n "$session_scope" ]] || session_scope="apply"  # 구 형식(2필드) 호환
   now=$(date +%s)
   if (( now >= expires )); then
     rm -f "$SESSION_FILE"
@@ -191,8 +195,22 @@ _session_check() {
 
 cmd_session() {
   need_cmd aws "brew install awscli"
-  local minutes="${1:-$DEFAULT_MINUTES}"
+  local minutes="" scope="apply"
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -d|--destroy) scope="destroy"; shift ;;
+      -h|--help) usage; exit 0 ;;
+      -*) die "알 수 없는 옵션: $1" "사용법: tfx session [분] [-d|--destroy]" ;;
+      *)
+        [[ -z "$minutes" ]] || die "분은 한 번만 지정하세요: $1"
+        minutes="$1"; shift ;;
+    esac
+  done
+  minutes="${minutes:-$DEFAULT_MINUTES}"
   [[ "$minutes" =~ ^[0-9]+$ && "$minutes" -ge 1 ]] || die "분은 1 이상의 숫자로 지정하세요: $minutes"
+
+  local scope_label="apply"
+  [[ "$scope" == "destroy" ]] && scope_label="apply/destroy"
 
   local ident account arn input
   ident=$(_identity) ||
@@ -200,15 +218,15 @@ cmd_session() {
   account=$(printf '%s' "$ident" | cut -f1)
   arn=$(printf '%s' "$ident" | cut -f2)
 
-  echo "apply 세션을 시작합니다:"
+  echo "${scope_label} 세션을 시작합니다:"
   _show_identity "$account" "$arn"
   echo
   read -r -p "계정 확인 — Account ID 뒷 4자리 입력: " input
   [[ "$input" == "${account: -4}" ]] || die "계정 확인 실패. 세션을 시작하지 않습니다."
 
   mkdir -p "$(dirname "$SESSION_FILE")"
-  printf '%s\t%s\n' "$(( $(date +%s) + minutes * 60 ))" "$account" >"$SESSION_FILE"
-  echo "✓ 세션 시작됨 — ${minutes}분간 apply 가능 (Account: $account)"
+  printf '%s\t%s\t%s\n' "$(( $(date +%s) + minutes * 60 ))" "$account" "$scope" >"$SESSION_FILE"
+  echo "✓ 세션 시작됨 — ${minutes}분간 ${scope_label} 가능 (Account: $account)"
 }
 
 cmd_status() {
@@ -216,15 +234,19 @@ cmd_status() {
     echo "세션 없음"
     exit 1
   fi
-  local expires account now
+  local expires account scope scope_label now
   expires=$(cut -f1 "$SESSION_FILE")
   account=$(cut -f2 "$SESSION_FILE")
+  scope=$(cut -f3 "$SESSION_FILE")
+  [[ -n "$scope" ]] || scope="apply"  # 구 형식(2필드) 호환
+  scope_label="apply"
+  [[ "$scope" == "destroy" ]] && scope_label="apply/destroy"
   now=$(date +%s)
   if (( now >= expires )); then
     echo "세션 만료됨 (Account: $account)"
     exit 1
   fi
-  echo "세션 유효 — 약 $(( (expires - now + 59) / 60 ))분 남음 (Account: $account)"
+  echo "세션 유효 — 약 $(( (expires - now + 59) / 60 ))분 남음 (Account: $account, ${scope_label})"
 }
 
 cmd_apply() {
@@ -266,6 +288,10 @@ cmd_destroy() {
     esac
   done
   _session_check
+
+  if [[ "$session_scope" != "destroy" ]]; then
+    die "현재 세션은 apply 전용입니다. destroy 세션을 시작하세요: tfx session -d"
+  fi
 
   local ident account arn
   ident=$(_identity) ||

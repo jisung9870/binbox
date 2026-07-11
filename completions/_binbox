@@ -153,7 +153,7 @@ _binbox() {
           'fmt:terraform fmt'
           'plan:terraform plan -out=<planfile>'
           'sum:plan 요약 (tf-summarize)'
-          'session:apply 세션 시작 (계정 확인)'
+          'session:세션 시작 (계정 확인) — 기본 apply, -d 지정 시 destroy 허용'
           'apply:세션 유효 + y/n 확인 후 terraform apply'
           'destroy:destroy plan 생성 + y/n 확인 후 apply'
           'status:세션 상태'
@@ -181,6 +181,11 @@ _binbox() {
               'rm:다중 선택 → state에서 제거'
             )
             _describe 'subcommand' ssubs
+            ;;
+          session)
+            _values 'option' \
+              '-d[destroy도 허용하는 세션]' \
+              '--destroy[destroy도 허용하는 세션]'
             ;;
         esac
       elif (( CURRENT > 3 )) && [[ "${words[2]}" == sum ]]; then
