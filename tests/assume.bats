@@ -229,3 +229,90 @@ JSON
   [ "$status" -eq 0 ]
   [[ "$output" == *"AKIASSO dev"* ]]
 }
+
+@test "assume profile: with no args lists profiles" {
+  write_config \
+    '[profile dev]' 'region = us-east-1' \
+    '[default]' 'region = us-east-1'
+  run "$ASSUME" profile
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"dev"* ]]
+  [[ "$output" == *"default"* ]]
+}
+
+@test "assume profile add static: keys to credentials, region to config" {
+  write_config '[default]' 'region = us-east-1'
+  run "$ASSUME" profile add st --type static \
+    --access-key-id AKIASTATIC --secret-access-key SECRETSTATIC --region ap-northeast-2
+  [ "$status" -eq 0 ]
+  grep -q '^\[st\]' "$HOME/.aws/credentials"
+  grep -q 'aws_access_key_id = AKIASTATIC' "$HOME/.aws/credentials"
+  grep -q 'aws_secret_access_key = SECRETSTATIC' "$HOME/.aws/credentials"
+  grep -q '^\[profile st\]' "$HOME/.aws/config"
+  grep -q 'region = ap-northeast-2' "$HOME/.aws/config"
+}
+
+@test "assume profile add role: writes role_arn and source_profile to config" {
+  write_config '[profile base]' 'region = us-east-1'
+  run "$ASSUME" profile add app --type role \
+    --role-arn arn:aws:iam::111122223333:role/App --source-profile base \
+    --region ap-northeast-2 --external-id ext-1
+  [ "$status" -eq 0 ]
+  grep -q '^\[profile app\]' "$HOME/.aws/config"
+  grep -q 'role_arn = arn:aws:iam::111122223333:role/App' "$HOME/.aws/config"
+  grep -q 'source_profile = base' "$HOME/.aws/config"
+  grep -q 'external_id = ext-1' "$HOME/.aws/config"
+}
+
+@test "assume profile add sso: references existing sso-session" {
+  write_config \
+    '[sso-session corp]' \
+    'sso_start_url = https://example.awsapps.com/start' \
+    'sso_region = ap-northeast-2'
+  run "$ASSUME" profile add prod --type sso --sso-session corp \
+    --account-id 123456789012 --role-name Admin --region ap-northeast-2
+  [ "$status" -eq 0 ]
+  grep -q '^\[profile prod\]' "$HOME/.aws/config"
+  grep -q 'sso_session = corp' "$HOME/.aws/config"
+  grep -q 'sso_account_id = 123456789012' "$HOME/.aws/config"
+  grep -q 'sso_role_name = Admin' "$HOME/.aws/config"
+}
+
+@test "assume profile add: duplicate name errors" {
+  write_config '[profile dev]' 'region = us-east-1'
+  run "$ASSUME" profile add dev --type role \
+    --role-arn arn:x --source-profile base --region us-east-1
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"이미 존재"* ]]
+}
+
+@test "assume profile rm -y: removes section and cache" {
+  write_config \
+    '[profile dev]' 'region = us-east-1' \
+    '[profile keep]' 'region = us-east-1'
+  mkdir -p "$BINBOX_ASSUME_CACHE_DIR"
+  echo '{}' > "$BINBOX_ASSUME_CACHE_DIR/dev.json"
+  run "$ASSUME" profile rm dev -y
+  [ "$status" -eq 0 ]
+  run "$ASSUME" list
+  [[ "$output" != *"dev"* ]]
+  [[ "$output" == *"keep"* ]]
+  [ ! -f "$BINBOX_ASSUME_CACHE_DIR/dev.json" ]
+}
+
+@test "assume profile show: prints the profile section" {
+  write_config \
+    '[profile dev]' \
+    'role_arn = arn:aws:iam::111122223333:role/App' \
+    'source_profile = base'
+  run "$ASSUME" profile show dev
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"[profile dev]"* ]]
+  [[ "$output" == *"role_arn = arn:aws:iam::111122223333:role/App"* ]]
+}
+
+@test "assume profile: unknown subcommand errors" {
+  run "$ASSUME" profile bogus
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"알 수 없는 profile 서브커맨드"* ]]
+}

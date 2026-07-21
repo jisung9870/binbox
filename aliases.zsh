@@ -27,7 +27,7 @@ bb() {
       ;;
     " assume ")
       case " ${2:-} " in
-        " list "|" current "|" exec "|" help "|" -h "|" --help ")
+        " list "|" current "|" exec "|" profile "|" help "|" -h "|" --help ")
           command bb "$@"
           ;;
         *)

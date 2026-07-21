@@ -149,6 +149,12 @@ kx pf my-pod 9000:8080
 bb assume lg-pak-ops       # AWS SSO/role profile → 임시 credentials export
 bb assume current          # 현재 env/account 확인
 bb assume unset            # AWS env 제거
+bb assume profile          # profile 목록 (add/edit/rm/show 관리)
+bb assume profile add prod --type sso --sso-session corp \
+  --account-id 123456789012 --role-name Admin   # 대화형 없이 프로필 추가 (플래그 생략 시 프롬프트)
+bb assume profile show prod   # profile 설정 조회
+bb assume profile rm prod     # profile 삭제 (-y 로 확인 생략)
+bb assume profile edit        # ~/.aws/config 편집기로 열기
 assm                       # 인스턴스 선택 → 셸 접속
 assm pf 8080               # 인스턴스 선택 → localhost:8080 → 인스턴스:8080
 assm pf db.internal:5432 15432  # 인스턴스 경유 원격 호스트 포워딩 (RDS 등)

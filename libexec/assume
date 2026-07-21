@@ -32,6 +32,12 @@ assume — AWS SSO/role profile을 현재 셸에 적용
   assume unset           # AWS/assume env 제거
   assume exec <profile> -- <cmd...>
 
+  assume profile               # profile 목록
+  assume profile add [name]    # profile 추가 (sso/role/static)
+  assume profile edit          # ~/.aws/config를 편집기로 열기
+  assume profile rm [name]     # profile 삭제 (-y 로 확인 생략)
+  assume profile show [name]   # profile 설정 조회
+
 지원:
   - AWS SSO profile (sso_session 또는 legacy sso_* 설정)
   - role_arn + source_profile chain
@@ -401,6 +407,299 @@ cmd_exec() {
   exec env -u AWS_PROFILE "${env_kv[@]}" "$@"
 }
 
+# ── profile 관리 (config/credentials 쓰기) ─────────────────────────────
+# 쓰기는 항상 temp 파일 → mv 로 원자적으로 교체한다.
+
+_config_header() {
+  # profile 이름 → INI 섹션 헤더(브래킷 안 내용). 읽기 쪽 _section_name과 일관.
+  local name="$1"
+  if [[ "$name" == "default" ]]; then
+    printf 'default'
+  else
+    printf 'profile %s' "$name"
+  fi
+}
+
+_section_exists() {
+  local file="$1" section="$2"
+  [[ -f "$file" ]] || return 1
+  awk -v section="$section" '
+    /^[[:space:]]*\[/ {
+      name=$0
+      sub(/^[[:space:]]*\[/, "", name)
+      sub(/\][[:space:]]*$/, "", name)
+      if (name == section) { found=1; exit }
+    }
+    END { exit(found ? 0 : 1) }
+  ' "$file"
+}
+
+_profile_exists() {
+  _section_exists "$AWS_CONFIG_FILE" "$(_config_header "$1")"
+}
+
+_sso_sessions() {
+  [[ -f "$AWS_CONFIG_FILE" ]] || return 0
+  awk '
+    /^[[:space:]]*\[/ {
+      name=$0
+      sub(/^[[:space:]]*\[/, "", name)
+      sub(/\][[:space:]]*$/, "", name)
+      if (name ~ /^sso-session /) { sub(/^sso-session /, "", name); print name }
+    }
+  ' "$AWS_CONFIG_FILE" | sort -u
+}
+
+_validate_profile_name() {
+  local name="$1"
+  [[ -n "$name" ]] || die "profile 이름이 비어 있습니다."
+  [[ "$name" != *']'* && "$name" != *$'\n'* ]] ||
+    die "profile 이름에 ']' 또는 개행을 쓸 수 없습니다: $name"
+}
+
+_ini_append_section() {
+  # file, section(브래킷 내용), 그다음 인자는 "key=value"...
+  local file="$1" section="$2" leading="" kv
+  shift 2
+  mkdir -p "$(dirname "$file")"
+  # 기존 내용이 있으면 빈 줄로 구분 (테스트를 리다이렉트 블록 밖에서 수행: SC2094 회피)
+  [[ -s "$file" ]] && leading=$'\n'
+  {
+    printf '%s[%s]\n' "$leading" "$section"
+    for kv in "$@"; do
+      printf '%s = %s\n' "${kv%%=*}" "${kv#*=}"
+    done
+  } >>"$file"
+}
+
+_ini_remove_section() {
+  # file 에서 [section] 헤더부터 다음 [ 헤더 전까지 제거
+  local file="$1" section="$2" tmp
+  [[ -f "$file" ]] || return 0
+  tmp="$file.tmp.$$"
+  awk -v section="$section" '
+    /^[[:space:]]*\[/ {
+      name=$0
+      sub(/^[[:space:]]*\[/, "", name)
+      sub(/\][[:space:]]*$/, "", name)
+      skip = (name == section)
+    }
+    !skip { print }
+  ' "$file" >"$tmp"
+  mv "$tmp" "$file"
+}
+
+_ini_print_section() {
+  local file="$1" section="$2"
+  [[ -f "$file" ]] || return 1
+  awk -v section="$section" '
+    /^[[:space:]]*\[/ {
+      name=$0
+      sub(/^[[:space:]]*\[/, "", name)
+      sub(/\][[:space:]]*$/, "", name)
+      if (name == section) { printing=1; print; next }
+      else if (printing) { exit }
+    }
+    printing { print }
+  ' "$file"
+}
+
+_write_static_credentials() {
+  local name="$1" key_id="$2" secret="$3" file="$AWS_SHARED_CREDENTIALS_FILE"
+  mkdir -p "$(dirname "$file")"
+  _ini_remove_section "$file" "$name"
+  _ini_append_section "$file" "$name" "aws_access_key_id=$key_id" "aws_secret_access_key=$secret"
+  chmod 600 "$file" 2>/dev/null || true
+}
+
+_prompt() {
+  # $1 라벨, $2(옵션) 기본값. TTY 없으면 기본값 반환하거나 die.
+  local label="$1" default="${2:-}" reply
+  if [[ ! -t 0 ]]; then
+    [[ -n "$default" ]] && { printf '%s' "$default"; return 0; }
+    die "대화형 입력이 필요합니다: $label (TTY 없음)"
+  fi
+  if [[ -n "$default" ]]; then
+    read -r -p "$label [$default]: " reply
+    printf '%s' "${reply:-$default}"
+  else
+    read -r -p "$label: " reply
+    printf '%s' "$reply"
+  fi
+}
+
+_pick_type() {
+  local sel
+  if command -v fzf >/dev/null 2>&1 && [[ -t 0 ]]; then
+    sel=$(printf 'sso\nrole\nstatic\n' | fzf_pick --prompt="profile type: ")
+  else
+    sel=$(_prompt "type (sso/role/static)")
+  fi
+  [[ -n "$sel" ]] || die "type을 선택하지 않았습니다."
+  printf '%s' "$sel"
+}
+
+_profile_add() {
+  local name="" type="" region=""
+  local sso_session="" sso_start_url="" sso_region="" account_id="" role_name=""
+  local role_arn="" source_profile="" mfa_serial="" external_id="" duration=""
+  local access_key_id="" secret_access_key=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -h|--help) usage; exit 0 ;;
+      --type) type="${2:-}"; shift 2 ;;
+      --region) region="${2:-}"; shift 2 ;;
+      --sso-session) sso_session="${2:-}"; shift 2 ;;
+      --sso-start-url) sso_start_url="${2:-}"; shift 2 ;;
+      --sso-region) sso_region="${2:-}"; shift 2 ;;
+      --account-id) account_id="${2:-}"; shift 2 ;;
+      --role-name) role_name="${2:-}"; shift 2 ;;
+      --role-arn) role_arn="${2:-}"; shift 2 ;;
+      --source-profile) source_profile="${2:-}"; shift 2 ;;
+      --mfa-serial) mfa_serial="${2:-}"; shift 2 ;;
+      --external-id) external_id="${2:-}"; shift 2 ;;
+      --duration) duration="${2:-}"; shift 2 ;;
+      --access-key-id) access_key_id="${2:-}"; shift 2 ;;
+      --secret-access-key) secret_access_key="${2:-}"; shift 2 ;;
+      --) shift; break ;;
+      -*) die "알 수 없는 옵션: $1" ;;
+      *) [[ -z "$name" ]] || die "profile 이름은 한 번만 지정하세요: $1"; name="$1"; shift ;;
+    esac
+  done
+
+  [[ -n "$name" ]] || name=$(_prompt "profile 이름")
+  _validate_profile_name "$name"
+  ! _profile_exists "$name" ||
+    die "이미 존재하는 profile입니다: $name" "수정하려면: assume profile edit"
+
+  [[ -n "$type" ]] || type=$(_pick_type)
+
+  case "$type" in
+    sso)
+      local existing
+      if [[ -z "$sso_session" && -z "$sso_start_url" ]]; then
+        existing=$(_sso_sessions)
+        if [[ -n "$existing" ]] && command -v fzf >/dev/null 2>&1 && [[ -t 0 ]]; then
+          sso_session=$(printf '%s\n[+ 새 sso-session]\n' "$existing" | fzf_pick --prompt="sso-session: ")
+          [[ "$sso_session" == "[+ 새 sso-session]" ]] && sso_session=""
+        fi
+      fi
+      if [[ -z "$sso_session" && -z "$sso_start_url" ]]; then
+        sso_session=$(_prompt "새 sso-session 이름" "$name")
+        sso_start_url=$(_prompt "sso_start_url")
+        sso_region=$(_prompt "sso_region")
+      fi
+      if [[ -n "$sso_start_url" ]]; then
+        [[ -n "$sso_session" ]] || sso_session="$name"
+        if ! _section_exists "$AWS_CONFIG_FILE" "sso-session $sso_session"; then
+          [[ -n "$sso_region" ]] || sso_region=$(_prompt "sso_region")
+          _ini_append_section "$AWS_CONFIG_FILE" "sso-session $sso_session" \
+            "sso_start_url=$sso_start_url" "sso_region=$sso_region" \
+            "sso_registration_scopes=sso:account:access"
+        fi
+      fi
+      [[ -n "$sso_session" ]] || die "sso_session이 필요합니다."
+      [[ -n "$account_id" ]] || account_id=$(_prompt "sso_account_id")
+      [[ -n "$role_name" ]] || role_name=$(_prompt "sso_role_name")
+      [[ -n "$region" || ! -t 0 ]] || region=$(_prompt "region (선택, 엔터로 건너뛰기)")
+      local -a kv=("sso_session=$sso_session" "sso_account_id=$account_id" "sso_role_name=$role_name")
+      [[ -n "$region" ]] && kv+=("region=$region")
+      _ini_append_section "$AWS_CONFIG_FILE" "$(_config_header "$name")" "${kv[@]}"
+      ;;
+    role)
+      [[ -n "$role_arn" ]] || role_arn=$(_prompt "role_arn")
+      [[ -n "$source_profile" ]] || source_profile=$(_prompt "source_profile")
+      [[ -n "$region" || ! -t 0 ]] || region=$(_prompt "region (선택, 엔터로 건너뛰기)")
+      [[ -n "$role_arn" && -n "$source_profile" ]] ||
+        die "role profile은 role_arn과 source_profile이 필요합니다."
+      local -a kv=("role_arn=$role_arn" "source_profile=$source_profile")
+      [[ -n "$region" ]] && kv+=("region=$region")
+      [[ -n "$mfa_serial" ]] && kv+=("mfa_serial=$mfa_serial")
+      [[ -n "$external_id" ]] && kv+=("external_id=$external_id")
+      [[ -n "$duration" ]] && kv+=("duration_seconds=$duration")
+      _ini_append_section "$AWS_CONFIG_FILE" "$(_config_header "$name")" "${kv[@]}"
+      ;;
+    static)
+      [[ -n "$access_key_id" ]] || access_key_id=$(_prompt "aws_access_key_id")
+      [[ -n "$secret_access_key" ]] || secret_access_key=$(_prompt "aws_secret_access_key")
+      [[ -n "$region" || ! -t 0 ]] || region=$(_prompt "region (선택, 엔터로 건너뛰기)")
+      [[ -n "$access_key_id" && -n "$secret_access_key" ]] ||
+        die "static profile은 aws_access_key_id와 aws_secret_access_key가 필요합니다."
+      _write_static_credentials "$name" "$access_key_id" "$secret_access_key"
+      [[ -n "$region" ]] && _ini_append_section "$AWS_CONFIG_FILE" "$(_config_header "$name")" "region=$region"
+      ;;
+    *) die "알 수 없는 type: $type (sso / role / static)" ;;
+  esac
+  echo "✓ profile 추가됨: $name ($type)" >&2
+}
+
+_profile_rm() {
+  local name="" yes=0
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -h|--help) usage; exit 0 ;;
+      -y|--yes) yes=1; shift ;;
+      -*) die "알 수 없는 옵션: $1" ;;
+      *) [[ -z "$name" ]] || die "profile 이름은 한 번만 지정하세요: $1"; name="$1"; shift ;;
+    esac
+  done
+  if [[ -z "$name" ]]; then
+    name=$(_pick_profile)
+    [[ -n "$name" ]] || exit 0
+  fi
+  _profile_exists "$name" || _section_exists "$AWS_SHARED_CREDENTIALS_FILE" "$name" ||
+    die "존재하지 않는 profile입니다: $name"
+  if [[ "$yes" -eq 0 ]]; then
+    confirm "삭제할까요? $name" || { echo "취소됨" >&2; exit 0; }
+  fi
+  _ini_remove_section "$AWS_CONFIG_FILE" "$(_config_header "$name")"
+  if _section_exists "$AWS_SHARED_CREDENTIALS_FILE" "$name"; then
+    _ini_remove_section "$AWS_SHARED_CREDENTIALS_FILE" "$name"
+    chmod 600 "$AWS_SHARED_CREDENTIALS_FILE" 2>/dev/null || true
+  fi
+  local cache
+  cache=$(_cache_file "$name")
+  [[ -f "$cache" ]] && rm -f "$cache"
+  echo "✓ profile 삭제됨: $name" >&2
+}
+
+_profile_show() {
+  local name="${1:-}" header sess
+  case "$name" in -h|--help) usage; exit 0 ;; esac
+  if [[ -z "$name" ]]; then
+    name=$(_pick_profile)
+    [[ -n "$name" ]] || exit 0
+  fi
+  header=$(_config_header "$name")
+  if _section_exists "$AWS_CONFIG_FILE" "$header"; then
+    _ini_print_section "$AWS_CONFIG_FILE" "$header"
+    sess=$(_config_get "$name" sso_session || true)
+    if [[ -n "$sess" ]]; then
+      echo
+      _ini_print_section "$AWS_CONFIG_FILE" "sso-session $sess"
+    fi
+  elif _section_exists "$AWS_SHARED_CREDENTIALS_FILE" "$name"; then
+    echo "# ~/.aws/credentials"
+    _ini_print_section "$AWS_SHARED_CREDENTIALS_FILE" "$name"
+  else
+    die "존재하지 않는 profile입니다: $name"
+  fi
+}
+
+cmd_profile() {
+  local sub="${1:-}"
+  [[ $# -gt 0 ]] && shift || true
+  case "$sub" in
+    ""|list) _profiles ;;
+    add) _profile_add "$@" ;;
+    edit) mkdir -p "$(dirname "$AWS_CONFIG_FILE")"; exec "${EDITOR:-vi}" "$AWS_CONFIG_FILE" ;;
+    rm|remove) _profile_rm "$@" ;;
+    show) _profile_show "$@" ;;
+    -h|--help|help) usage; exit 0 ;;
+    *) die "알 수 없는 profile 서브커맨드: $sub (add / edit / rm / show)" ;;
+  esac
+}
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
     -h|--help|help) usage; exit 0 ;;
@@ -408,6 +707,7 @@ while [[ $# -gt 0 ]]; do
     list) _profiles; exit 0 ;;
     current) cmd_current; exit 0 ;;
     unset) cmd_unset; exit 0 ;;
+    profile) shift; cmd_profile "$@"; exit 0 ;;
     exec) shift; cmd_exec "$@" ;;
     --) shift; break ;;
     -*) die "알 수 없는 옵션: $1" ;;

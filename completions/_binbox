@@ -214,6 +214,7 @@ _binbox() {
           'current:현재 AWS env/account 상태'
           'unset:AWS assume env 제거'
           'exec:profile 적용 후 명령 실행'
+          'profile:AWS profile 추가/수정/삭제/조회'
           '--refresh:credential cache 무시'
           '--help:도움말'
         )
@@ -221,9 +222,19 @@ _binbox() {
         _binbox_aws_profiles
       elif (( CURRENT == 3 )) && [[ "${words[2]}" == (--refresh|exec) ]]; then
         _binbox_aws_profiles
+      elif (( CURRENT == 3 )) && [[ "${words[2]}" == profile ]]; then
+        local -a psubs=(
+          'add:profile 추가 (sso/role/static)'
+          'edit:~/.aws/config 편집'
+          'rm:profile 삭제'
+          'show:profile 설정 조회'
+        )
+        _describe 'profile subcommand' psubs
       elif (( CURRENT == 4 )) && [[ "${words[2]}" == exec ]]; then
         local -a sep=('--:명령 구분자')
         _describe 'separator' sep
+      elif (( CURRENT == 4 )) && [[ "${words[2]}" == profile && "${words[3]}" == (rm|show) ]]; then
+        _binbox_aws_profiles
       fi
       ;;
     assm)
