@@ -1,0 +1,24 @@
+# oh-my-claudecode operational state (skills are the committable exception)
+# Ignore .omc contents (not the dir itself) so the skills negation can apply.
+.omc/*
+!.omc/skills/
+
+# macOS
+.DS_Store
+
+# Editors
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
+
+# Local overrides / secrets
+*.local
+.env
+.env.*
+
+# Logs & temp
+*.log
+*.tmp
+*.bak
