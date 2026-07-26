@@ -54,6 +54,12 @@ binbox 바깥의 설정이 binbox에 의존하는 곳. **명령어 이름을 바
 
 ## 완료
 
+### 2026-07 — Trivy 보안 스캔 통합
+
+- [x] **`tvx` — Trivy 워크플로우 통합 명령** — image/repo/config 검사, 환경변수 기반
+      CI severity 정책, CycloneDX SBOM, JSON/SARIF 리포트, Kubernetes 안전 기본값,
+      cache clean 및 doctor 제공
+
 ### 2026-07 — 설치 자동화 / WSL / 워크플로우 통합
 
 - [x] **`bb setup` — 초기 설정 자동화** — `~/.local/bin/bb` 심볼릭 링크 + 셸 감지(zsh/bash) 후

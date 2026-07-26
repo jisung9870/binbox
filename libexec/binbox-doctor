@@ -48,6 +48,7 @@ check_cmd age "optional: sec" "$(pkg_hint 'brew install age' 'sudo apt install a
 check_cmd jq "optional: assume/sec" "$(pkg_hint 'brew install jq' 'sudo apt install jq')"
 check_cmd shellcheck "optional: binbox-check" "$(pkg_hint 'brew install shellcheck' 'sudo apt install shellcheck')"
 check_cmd bats "optional: make test" "$(pkg_hint 'brew install bats-core' 'sudo apt install bats')"
+check_cmd trivy "optional: tvx" "$(pkg_hint 'brew install trivy' 'Trivy 공식 설치 가이드 — https://trivy.dev/latest/getting-started/installation/')"
 
 echo
 if ((core_missing)); then

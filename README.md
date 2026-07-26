@@ -234,6 +234,31 @@ sec edit                            # $EDITOR로 전체 JSON 편집
 - 경로는 `BINBOX_SECRETS_FILE` / `BINBOX_AGE_KEY`로 변경 가능.
 - `list`/`copy`/에러 메시지에 값이 노출되지 않고, `edit` 외에는 평문이 디스크에 닿지 않는다.
 
+### 보안 스캔 — tvx
+
+로컬에 설치된 [Trivy](https://trivy.dev/)를 이미지·저장소·IaC·CI 워크플로우에 맞게
+일관된 기본값으로 실행한다. 상세 옵션과 예외 처리는 Trivy의 `trivy.yaml`,
+`.trivyignore`, `trivy-secret.yaml`을 그대로 사용한다.
+
+```bash
+tvx image nginx:latest                 # 이미지 취약점·오설정·시크릿
+tvx repo .                             # 현재 저장소 전체 검사
+tvx config infra/                      # Terraform/K8s/Dockerfile 등 IaC
+tvx ci repo .                          # HIGH/CRITICAL 발견 시 exit 1
+TVX_CI_SEVERITY=CRITICAL tvx ci image app:v1
+tvx sbom image app:v1 -o sbom.cdx.json # CycloneDX SBOM
+tvx report sarif repo . -o trivy.sarif
+tvx k8s                               # 현재 context 요약 검사
+tvx clean                             # scan cache 제거
+tvx doctor                            # 버전·설정 파일 확인
+```
+
+- 일반 검사는 결과가 있어도 Trivy 기본 종료 코드(0)를 유지하고 `tvx ci`만 보안 게이트로 동작한다.
+- `tvx ci`의 scanner, severity, exit-code 정책은 CLI에서 재정의할 수 없다. 심각도는
+  `TVX_CI_SEVERITY`로 조정한다.
+- `tvx k8s`는 기본적으로 node collector를 꺼 클러스터에 Job을 만들지 않는다.
+  노드까지 검사할 때만 `--with-node-collector`를 지정하고 실행 확인을 거친다.
+
 ### Docker — dx
 
 호스트에 도구를 설치하지 않고 컨테이너로 실행한다. `dx.d/`에 설정 파일을 추가하면 자동 인식.
@@ -328,4 +353,5 @@ make ci        # check + test
 - aws cli, session-manager-plugin — assume, assm, wenv, tfx
 - age, jq — assume, sec
 - shellcheck, bats-core — 개발용
+- trivy — tvx
 - ss/iproute2 — Linux portcheck (없으면 lsof 대체)

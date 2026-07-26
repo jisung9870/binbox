@@ -1,0 +1,265 @@
+#!/usr/bin/env bash
+# tvx — Trivy 보안 스캔 워크플로우 통합 명령
+set -euo pipefail
+
+_self=$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || echo "${BASH_SOURCE[0]}")
+BINBOX_DIR=$(cd "$(dirname "$_self")/.." && pwd)
+# shellcheck source=../lib/common.sh
+source "$BINBOX_DIR/lib/common.sh" || { echo "lib/common.sh not found" >&2; exit 1; }
+
+usage() {
+  cat <<'EOF'
+tvx — Trivy 보안 스캔 워크플로우 통합 명령
+
+사용법:
+  tvx image <image> [Trivy 옵션...]
+  tvx repo [path-or-url] [Trivy 옵션...]       # 기본 대상: .
+  tvx config [dir] [Trivy 옵션...]             # 기본 대상: .
+  tvx ci <image|repo|config> [target] [옵션...] # HIGH,CRITICAL 발견 시 실패
+  tvx sbom <image|repo> [target] [옵션...]      # CycloneDX SBOM 생성
+  tvx report <json|sarif> <image|repo|config> [target] [옵션...]
+  tvx k8s [context] [옵션...]                   # summary, node collector 기본 비활성
+  tvx clean [Trivy clean 옵션...]               # 기본: --scan-cache
+  tvx doctor
+
+환경변수:
+  TVX_CI_SEVERITY   CI 실패 심각도 (기본: HIGH,CRITICAL)
+
+예시:
+  tvx image nginx:latest --ignore-unfixed
+  tvx repo .
+  tvx ci repo .
+  TVX_CI_SEVERITY=CRITICAL tvx ci image app:latest
+  tvx sbom image app:latest -o sbom.cdx.json
+  tvx report sarif repo . -o trivy.sarif
+  tvx k8s my-context --include-namespaces default
+  tvx k8s --with-node-collector
+EOF
+}
+
+need_trivy() {
+  need_cmd trivy "macOS: brew install trivy / Linux: https://trivy.dev/latest/getting-started/installation/"
+}
+
+# 선택 대상은 첫 번째 위치 인자로 받는다. repo/config는 생략하면 현재 디렉터리.
+run_scan() {
+  local kind="$1" target scanners
+  shift
+  scanners="vuln,misconfig,secret"
+
+  if [[ "$kind" == image ]]; then
+    [[ $# -gt 0 && "$1" != -* ]] || die "사용법: tvx image <image> [Trivy 옵션...]"
+    target="$1"
+    shift
+  else
+    target="."
+    if [[ $# -gt 0 && "$1" != -* ]]; then
+      target="$1"
+      shift
+    fi
+  fi
+
+  need_trivy
+  if [[ "$kind" == config ]]; then
+    trivy config "$target" "$@"
+  else
+    trivy "$kind" --scanners "$scanners" "$target" "$@"
+  fi
+}
+
+reject_ci_policy_overrides() {
+  local arg
+  for arg in "$@"; do
+    case "$arg" in
+      -s|-[sS]?*|--severity|--severity=*|--exit-code|--exit-code=*|--scanners|--scanners=*)
+        die "tvx ci 정책 옵션은 직접 재정의할 수 없습니다: $arg (심각도는 TVX_CI_SEVERITY 사용)"
+        ;;
+    esac
+  done
+}
+
+run_ci() {
+  local kind="${1:-}" target severity scanners
+  [[ -n "$kind" ]] || die "사용법: tvx ci <image|repo|config> [target] [옵션...]"
+  shift || true
+  case "$kind" in
+    image|repo|config) ;;
+    *) die "지원하지 않는 CI 대상: $kind (image, repo, config 중 선택)" ;;
+  esac
+
+  target="."
+  if [[ "$kind" == image ]]; then
+    [[ $# -gt 0 && "$1" != -* ]] || die "사용법: tvx ci image <image> [옵션...]"
+    target="$1"
+    shift
+  elif [[ $# -gt 0 && "$1" != -* ]]; then
+    target="$1"
+    shift
+  fi
+
+  severity="${TVX_CI_SEVERITY:-HIGH,CRITICAL}"
+  case "$severity" in
+    UNKNOWN|LOW|MEDIUM|HIGH|CRITICAL) ;;
+    *)
+      if ! printf '%s\n' "$severity" |
+        grep -Eq '^(UNKNOWN|LOW|MEDIUM|HIGH|CRITICAL)(,(UNKNOWN|LOW|MEDIUM|HIGH|CRITICAL))*$'; then
+        die "올바르지 않은 TVX_CI_SEVERITY: $severity"
+      fi
+      ;;
+  esac
+  reject_ci_policy_overrides "$@"
+  need_trivy
+
+  if [[ "$kind" == config ]]; then
+    trivy config --severity "$severity" --exit-code 1 "$target" "$@"
+  else
+    scanners="vuln,misconfig,secret"
+    trivy "$kind" --scanners "$scanners" --severity "$severity" --exit-code 1 "$target" "$@"
+  fi
+}
+
+reject_format_override() {
+  local arg
+  for arg in "$@"; do
+    case "$arg" in
+      -f|-[fF]?*|--format|--format=*) die "출력 형식은 tvx 하위 명령에서 결정됩니다: $arg" ;;
+    esac
+  done
+}
+
+run_sbom() {
+  local kind="${1:-}" target
+  [[ -n "$kind" ]] || die "사용법: tvx sbom <image|repo> [target] [옵션...]"
+  shift || true
+  case "$kind" in
+    image)
+      [[ $# -gt 0 && "$1" != -* ]] || die "사용법: tvx sbom image <image> [옵션...]"
+      target="$1"
+      shift
+      ;;
+    repo)
+      target="."
+      if [[ $# -gt 0 && "$1" != -* ]]; then target="$1"; shift; fi
+      ;;
+    *) die "지원하지 않는 SBOM 대상: $kind (image, repo 중 선택)" ;;
+  esac
+  reject_format_override "$@"
+  need_trivy
+  trivy "$kind" --format cyclonedx "$target" "$@"
+}
+
+run_report() {
+  local format="${1:-}" kind="${2:-}" target scanners
+  [[ "$format" == json || "$format" == sarif ]] ||
+    die "사용법: tvx report <json|sarif> <image|repo|config> [target] [옵션...]"
+  [[ -n "$kind" ]] ||
+    die "사용법: tvx report <json|sarif> <image|repo|config> [target] [옵션...]"
+  shift 2
+  case "$kind" in
+    image)
+      [[ $# -gt 0 && "$1" != -* ]] || die "tvx report $format image에는 이미지가 필요합니다."
+      target="$1"
+      shift
+      ;;
+    repo|config)
+      target="."
+      if [[ $# -gt 0 && "$1" != -* ]]; then target="$1"; shift; fi
+      ;;
+    *) die "지원하지 않는 리포트 대상: $kind (image, repo, config 중 선택)" ;;
+  esac
+  reject_format_override "$@"
+  need_trivy
+  if [[ "$kind" == config ]]; then
+    trivy config --format "$format" "$target" "$@"
+  else
+    scanners="vuln,misconfig,secret"
+    trivy "$kind" --scanners "$scanners" --format "$format" "$target" "$@"
+  fi
+}
+
+run_k8s() {
+  local context="" with_collector=0 current="" arg
+  local -a args=()
+
+  if [[ $# -gt 0 && "$1" != -* ]]; then
+    context="$1"
+    shift
+  fi
+  for arg in "$@"; do
+    if [[ "$arg" == --with-node-collector ]]; then
+      with_collector=1
+    else
+      args+=("$arg")
+    fi
+  done
+
+  if [[ -n "$context" ]]; then
+    current="$context"
+  elif command -v kubectl >/dev/null 2>&1; then
+    current=$(kubectl config current-context 2>/dev/null || true)
+  fi
+  echo "Kubernetes context: ${current:-(kubeconfig 기본 context)}" >&2
+
+  need_trivy
+  if ((with_collector)); then
+    echo "주의: node-collector가 대상 클러스터에 Job/namespace를 생성할 수 있습니다." >&2
+    confirm "node-collector를 실행할까요?" || { echo "취소되었습니다." >&2; return 0; }
+    if [[ -n "$context" ]]; then
+      trivy kubernetes --report summary ${args[@]+"${args[@]}"} "$context"
+    else
+      trivy kubernetes --report summary ${args[@]+"${args[@]}"}
+    fi
+  else
+    if [[ -n "$context" ]]; then
+      trivy kubernetes --report summary --disable-node-collector ${args[@]+"${args[@]}"} "$context"
+    else
+      trivy kubernetes --report summary --disable-node-collector ${args[@]+"${args[@]}"}
+    fi
+  fi
+}
+
+run_clean() {
+  need_trivy
+  if [[ $# -eq 0 ]]; then
+    trivy clean --scan-cache
+  else
+    trivy clean "$@"
+  fi
+}
+
+run_doctor() {
+  echo "tvx doctor"
+  echo
+  need_trivy
+  trivy version
+  echo
+  echo "현재 디렉터리 설정"
+  local file
+  for file in trivy.yaml .trivyignore trivy-secret.yaml; do
+    if [[ -f "$file" ]]; then
+      printf '✓ %s\n' "$file"
+    else
+      printf '· %s (없음)\n' "$file"
+    fi
+  done
+}
+
+if [[ $# -ge 2 && ("$2" == -h || "$2" == --help) ]]; then
+  usage
+  exit 0
+fi
+
+case "${1:-}" in
+  ""|-h|--help|help) usage ;;
+  image|repo|config)
+    sub="$1"; shift
+    run_scan "$sub" "$@"
+    ;;
+  ci) shift; run_ci "$@" ;;
+  sbom) shift; run_sbom "$@" ;;
+  report) shift; run_report "$@" ;;
+  k8s) shift; run_k8s "$@" ;;
+  clean) shift; run_clean "$@" ;;
+  doctor) shift; [[ $# -eq 0 ]] || die "tvx doctor는 인자를 받지 않습니다."; run_doctor ;;
+  *) die "알 수 없는 하위 명령: $1 (tvx --help 참고)" ;;
+esac
