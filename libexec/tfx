@@ -34,10 +34,24 @@ tfx — terraform 워크플로우 통합 명령
   tfx state show          # fzf 선택 → terraform state show
   tfx state mv            # fzf 선택 → 새 주소 입력 → 확인 후 state mv
   tfx state rm            # fzf 다중 선택 → 확인 후 state rm
+  tfx review [옵션] [root] # 여러 root를 init→plan→분류 (NOCHANGE/EXPECTED/REVIEW/ERROR)
+                          #   인자 없으면 fzf 다중 선택, --all 로 전체 (backend.tf 자동 탐색)
 
 Planfile:
   기본값은 ./tfplan. 환경변수 TFPLAN_FILE로 지정 가능. (plan/sum/apply 공유)
   destroy plan 기본값은 ./tfdestroyplan. 환경변수 TFDESTROY_PLAN_FILE로 지정 가능.
+
+Review (기능은 tfx 안에서, 자격/변수는 assume·wenv 가 담당 — 관심사 분리):
+  규칙 우선순위: 내장 기본 < <repo>/.tf-review.json < CLI 플래그
+    --repo PATH          검토 리포 루트 (기본: 현재 디렉터리, env TF_REPO)
+    --config PATH        규칙 설정 파일 (기본: <repo>/.tf-review.json 있으면 사용)
+    --allow-paths a,b    허용 변경 path (콤마 구분, 기본: tags,tags_all,tag,tag_specifications)
+    --allow-actions x,y  허용 action (콤마 구분, 기본: update)
+    --match prefix|glob  path 매칭 모드 (기본: prefix)
+    --all                fzf 대신 backend.tf 를 가진 모든 root 검토 (CI/비대화형)
+  결과: NOCHANGE(변경 없음) / EXPECTED(규칙 내) / REVIEW(규칙 밖) / ERROR. 로그는 각 root의 .tf-review/.
+  REVIEW·ERROR 가 하나라도 있으면 exit 2 (CI 게이트).
+  env: PLAN_LOCK(기본 false) / PLAN_ARGS(plan 추가 인자) / INIT_RECONFIGURE(기본 true).
 
 동작:
   - plan 파일 apply는 terraform의 yes 확인이 생략되므로 tfx가 별도 y/n 확인을 추가한다.
@@ -54,6 +68,10 @@ Planfile:
   tfx session 15 && tfx apply
   tfx session 15 -d && tfx destroy
   terraform taint "$(tfx state)"
+  tfx review                          # fzf로 root 골라 배치 검토
+  tfx review --all                    # backend.tf 가진 전체 root
+  tfx review --repo ~/infra a b       # 특정 root만
+  tfx review --allow-actions update,create
 EOF
 }
 
@@ -394,6 +412,258 @@ cmd_state() {
   esac
 }
 
+# --- review (구 tf-review 통합): 여러 root를 init→plan→분류 ---
+# plan 결과가 사전 정의한 '예상 변경(규칙)'만 포함하는지 확인하고, 그 외는 REVIEW로 표시한다.
+# 규칙 우선순위: 내장 기본값 < <repo>/.tf-review.json < CLI 플래그.
+
+# 변경 분류 jq 필터 — 인자: --argjson allow_paths, --argjson allow_actions, --arg match
+_review_jq() {
+  cat <<'JQEOF'
+def scalar_or_empty_paths:
+  if . == null then []
+  else [paths(scalars)]
+  end;
+
+def changed_paths($before; $after):
+  (($before // {}) as $b
+   | ($after // {}) as $a
+   | (($b | scalar_or_empty_paths) + ($a | scalar_or_empty_paths) | unique)
+   | map(. as $p | select(($b | getpath($p)? // null) != ($a | getpath($p)? // null))));
+
+def path_text($p):
+  $p | map(tostring) | join(".");
+
+# dotted path 가 허용 패턴에 부합하는지.
+#   prefix : 패턴과 같거나 "패턴." 으로 시작 (예: tags -> tags / tags.Env)
+#   glob   : '*' 를 한 세그먼트 와일드카드로 해석한 prefix 매칭
+def is_allowed_path($p):
+  ($p | length) > 0 and
+  (path_text($p) as $t
+   | any($allow_paths[];
+       . as $pat
+       | if $match == "glob"
+         then ($t | test("^" + ($pat | gsub("\\."; "\\.") | gsub("\\*"; "[^.]*")) + "(\\.|$)"))
+         else ($t == $pat or ($t | startswith($pat + "."))) end));
+
+[ .resource_changes[]
+  | select((.change.actions | tostring) != "[\"no-op\"]")
+  | select((.change.actions | tostring) != "[\"read\"]")
+] as $changes
+| if ($changes | length) == 0 then
+    {status: "NOCHANGE", detail: ""}
+  else
+    ($changes | map(
+      changed_paths(.change.before; .change.after) as $paths
+      | {
+          address: .address,
+          actions: .change.actions,
+          paths: ($paths | map(path_text(.))),
+          review: (
+            # action 이 허용 목록을 벗어나면 검토 대상.
+            (((.change.actions - $allow_actions) | length) > 0)
+            # path 필터는 in-place update 에만 의미가 있다.
+            or ((.change.actions == ["update"])
+                and (($paths | map(select(is_allowed_path(.) | not)) | length) > 0))
+          )
+        }
+    )) as $items
+    | ($items | map(select(.review))) as $review_items
+    | {
+        status: (if ($review_items | length) > 0 then "REVIEW" else "EXPECTED" end),
+        detail: (
+          $review_items
+          | map(.address + " [" + (.actions | join(",")) + "] paths=" + ((.paths | join(",")) // ""))
+          | join("; ")
+        )
+      }
+  end
+| [.status, .detail] | @tsv
+JQEOF
+}
+
+# terraform 이 사용자 중단(SIGINT/SIGTERM)으로 죽었으면 배치를 즉시 정리 종료
+_review_interrupted() {
+  case "$1" in
+    130|131|143) echo; echo "중단됨: 사용자 요청으로 종료합니다." >&2; exit 130 ;;
+  esac
+}
+
+# backend.tf 가 있는 root 목록 (현재 repo 기준 상대경로)
+_review_discover() {
+  find . -name backend.tf -not -path '*/.terraform/*' \
+    -exec dirname {} \; | sort -u | sed 's|^\./||'
+}
+
+cmd_review() {
+  need_cmd terraform "brew install terraform"
+  need_cmd jq "brew install jq"
+  # -detailed-exitcode(2) 와 root별 실패를 rc로 직접 판정하므로 errexit 를 끈다
+  # (pipefail/nounset 은 유지). 이 함수는 항상 명시적으로 exit 한다.
+  set +e
+
+  local repo="${TF_REPO:-$PWD}" config="" cli_paths="" cli_actions="" cli_match="" all=0
+  local -a stack_args=()
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -h|--help) usage; exit 0 ;;
+      --repo) repo="${2:-}"; shift 2 ;;
+      --repo=*) repo="${1#*=}"; shift ;;
+      --config) config="${2:-}"; shift 2 ;;
+      --config=*) config="${1#*=}"; shift ;;
+      --allow-paths) cli_paths="${2:-}"; shift 2 ;;
+      --allow-paths=*) cli_paths="${1#*=}"; shift ;;
+      --allow-actions) cli_actions="${2:-}"; shift 2 ;;
+      --allow-actions=*) cli_actions="${1#*=}"; shift ;;
+      --match) cli_match="${2:-}"; shift 2 ;;
+      --match=*) cli_match="${1#*=}"; shift ;;
+      --all) all=1; shift ;;
+      --) shift; while [[ $# -gt 0 ]]; do stack_args+=("$1"); shift; done ;;
+      -*) die "알 수 없는 옵션: $1" "사용법: tfx review [옵션] [root ...]" ;;
+      *) stack_args+=("$1"); shift ;;
+    esac
+  done
+
+  [[ -d "$repo" ]] || die "리포 경로가 디렉터리가 아닙니다: $repo"
+  repo="$(cd "$repo" && pwd)"
+  cd "$repo" || die "cd 실패: $repo"
+
+  # ruleset: 내장 기본 < .tf-review.json < CLI
+  local allow_paths='["tags","tags_all","tag","tag_specifications"]'
+  local allow_actions='["update"]'
+  local match="prefix" v
+  [[ -z "$config" && -f "$repo/.tf-review.json" ]] && config="$repo/.tf-review.json"
+  if [[ -n "$config" ]]; then
+    [[ -f "$config" ]] || die "설정 파일이 없습니다: $config"
+    jq -e . "$config" >/dev/null 2>&1 || die "설정 파일 JSON 파싱 실패: $config"
+    v="$(jq -c '.allow_paths // empty' "$config")";   [[ -n "$v" ]] && allow_paths="$v"
+    v="$(jq -c '.allow_actions // empty' "$config")"; [[ -n "$v" ]] && allow_actions="$v"
+    v="$(jq -r '.match // empty' "$config")";         [[ -n "$v" ]] && match="$v"
+  fi
+  [[ -n "$cli_paths" ]] && allow_paths="$(printf '%s' "$cli_paths" |
+    jq -Rc 'split(",") | map(gsub("^\\s+|\\s+$";"")) | map(select(length>0))')"
+  [[ -n "$cli_actions" ]] && allow_actions="$(printf '%s' "$cli_actions" |
+    jq -Rc 'split(",") | map(gsub("^\\s+|\\s+$";"")) | map(select(length>0))')"
+  [[ -n "$cli_match" ]] && match="$cli_match"
+  case "$match" in prefix | glob) ;; *) die "--match 는 prefix 또는 glob 이어야 합니다: $match" ;; esac
+
+  # 대상 root 수집: 인자 지정 > (fzf 선택 | --all 전체)
+  local -a dirs=()
+  local line
+  if [[ ${#stack_args[@]} -gt 0 ]]; then
+    local a
+    for a in "${stack_args[@]}"; do
+      a="${a#./}"
+      [[ -f "$a/backend.tf" ]] || die "backend.tf 가 없습니다: $repo/$a"
+      dirs+=("$a")
+    done
+  else
+    local discovered
+    discovered="$(_review_discover)"
+    [[ -n "$discovered" ]] || die "backend.tf 를 가진 root 가 없습니다: $repo"
+    if [[ "$all" -eq 1 ]]; then
+      while IFS= read -r line; do [[ -n "$line" ]] && dirs+=("$line"); done <<<"$discovered"
+    else
+      need_cmd fzf "brew install fzf"
+      local picked
+      picked="$(printf '%s\n' "$discovered" |
+        fzf_pick -m --prompt="review root 선택 (Tab 다중, 전체는 --all): " --preview 'ls {} 2>/dev/null')"
+      [[ -n "$picked" ]] || exit 0
+      while IFS= read -r line; do [[ -n "$line" ]] && dirs+=("$line"); done <<<"$picked"
+    fi
+  fi
+
+  # 실행 옵션 (env 로 조정 — 구 tf-review 호환)
+  local plan_lock="${PLAN_LOCK:-false}"
+  local plan_args="${PLAN_ARGS:-}"
+  local init_reconfigure="${INIT_RECONFIGURE:-true}"
+  local out_dir_name="${OUT_DIR_NAME:-.tf-review}"
+
+  echo "Terraform review"
+  echo "REPO          : $repo"
+  echo "STACKS        : ${#dirs[@]}"
+  echo "RULESET       : ${config:-(defaults)}"
+  echo "  allow_paths   : $allow_paths"
+  echo "  allow_actions : $allow_actions"
+  echo "  match         : $match"
+  echo
+
+  local jq_filter; jq_filter="$(_review_jq)"
+  local -a summary=()
+  local review_count=0 error_count=0 d out tf_plan rc status detail
+
+  for d in "${dirs[@]}"; do
+    echo "=========================================================="
+    echo ">>> $d"
+    out="$d/$out_dir_name"; tf_plan="$out_dir_name/plan.bin"
+    mkdir -p "$out"
+    local -a init_args=("-input=false")
+    [[ "$init_reconfigure" == "true" ]] && init_args+=("-reconfigure")
+
+    terraform -chdir="$d" init "${init_args[@]}" >"$out/init.log" 2>&1; rc=$?
+    _review_interrupted "$rc"
+    if [[ $rc -ne 0 ]]; then
+      echo "    => ERROR (init 실패, 로그: $out/init.log)"
+      summary+=("$d"$'\t'"ERROR"$'\t'"init 실패"); error_count=$((error_count + 1)); continue
+    fi
+
+    # PLAN_ARGS 는 -var-file 같은 추가 인자 escape hatch (의도적 word splitting)
+    # shellcheck disable=SC2086
+    terraform -chdir="$d" plan -input=false -lock="$plan_lock" -detailed-exitcode \
+      $plan_args -out="$tf_plan" >"$out/plan.log" 2>&1; rc=$?
+    _review_interrupted "$rc"
+    if [[ $rc -eq 1 ]]; then
+      echo "    => ERROR (plan 실패, 로그: $out/plan.log)"
+      summary+=("$d"$'\t'"ERROR"$'\t'"plan 실패"); error_count=$((error_count + 1)); continue
+    fi
+    if [[ $rc -ne 0 && $rc -ne 2 ]]; then
+      echo "    => ERROR (plan 실패 rc=$rc, 로그: $out/plan.log)"
+      summary+=("$d"$'\t'"ERROR"$'\t'"plan 실패 rc=$rc"); error_count=$((error_count + 1)); continue
+    fi
+
+    terraform -chdir="$d" show -json "$tf_plan" >"$out/plan.json" 2>>"$out/plan.log"; rc=$?
+    _review_interrupted "$rc"
+    if [[ $rc -ne 0 ]]; then
+      echo "    => ERROR (show -json 실패, 로그: $out/plan.log)"
+      summary+=("$d"$'\t'"ERROR"$'\t'"show -json 실패"); error_count=$((error_count + 1)); continue
+    fi
+
+    line="$(jq -r --argjson allow_paths "$allow_paths" --argjson allow_actions "$allow_actions" \
+      --arg match "$match" "$jq_filter" "$out/plan.json" 2>"$out/jq.log")"; rc=$?
+    _review_interrupted "$rc"
+    if [[ $rc -ne 0 ]]; then
+      echo "    => ERROR (jq 분석 실패, 로그: $out/jq.log)"
+      summary+=("$d"$'\t'"ERROR"$'\t'"jq 분석 실패"); error_count=$((error_count + 1)); continue
+    fi
+
+    status="${line%%$'\t'*}"; detail="${line#*$'\t'}"
+    [[ "$status" == "$detail" ]] && detail=""
+    echo "    => $status"
+    if [[ "$status" == "REVIEW" ]]; then
+      echo "       $detail"; review_count=$((review_count + 1))
+    fi
+    summary+=("$d"$'\t'"$status"$'\t'"$detail")
+  done
+
+  echo
+  echo "=================== 요약 ==================="
+  printf "%-34s %s\n" "DIRECTORY" "STATUS"
+  echo "------------------------------------------------------------"
+  local row rd rest rstatus rdetail
+  for row in ${summary[@]+"${summary[@]}"}; do
+    rd="${row%%$'\t'*}"; rest="${row#*$'\t'}"
+    rstatus="${rest%%$'\t'*}"; rdetail="${rest#*$'\t'}"
+    printf "%-34s %s\n" "$rd" "$rstatus"
+    [[ "$rstatus" == "REVIEW" ]] && printf "%-34s   -> %s\n" "" "$rdetail"
+  done
+
+  echo
+  echo "REVIEW: $review_count, ERROR: $error_count"
+  if [[ $error_count -gt 0 || $review_count -gt 0 ]]; then
+    exit 2
+  fi
+  exit 0
+}
+
 # --- dispatch ---
 
 case "${1:-}" in
@@ -409,6 +679,7 @@ case "${1:-}" in
   status)  cmd_status ;;
   end)     rm -f "$SESSION_FILE"; echo "세션 종료됨" ;;
   state)   shift; cmd_state "$@" ;;
+  review)  shift; cmd_review "$@" ;;
   *)
     echo "unknown subcommand: $1" >&2
     usage >&2

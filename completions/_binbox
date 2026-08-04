@@ -159,6 +159,7 @@ _binbox() {
           'status:세션 상태'
           'end:세션 종료'
           'state:state 탐색/조작 (fzf)'
+          'review:여러 root 배치 검토 (init→plan→분류)'
         )
         _describe 'subcommand' subs
       elif (( CURRENT == 3 )); then
@@ -187,9 +188,21 @@ _binbox() {
               '-d[destroy도 허용하는 세션]' \
               '--destroy[destroy도 허용하는 세션]'
             ;;
+          review)
+            _values 'option' \
+              '--all[backend.tf 가진 전체 root]' \
+              '--repo[검토 리포 루트]' \
+              '--config[규칙 설정 파일]' \
+              '--allow-paths[허용 변경 path]' \
+              '--allow-actions[허용 action]' \
+              '--match[매칭 모드 prefix|glob]'
+            _files -/
+            ;;
         esac
       elif (( CURRENT > 3 )) && [[ "${words[2]}" == sum ]]; then
         _files
+      elif (( CURRENT > 3 )) && [[ "${words[2]}" == review ]]; then
+        _files -/
       fi
       ;;
     wenv)
