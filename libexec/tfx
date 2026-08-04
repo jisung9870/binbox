@@ -121,7 +121,9 @@ cmd_plan() {
 
 cmd_sum() {
   local SUB="${1:-summary}"
-  [[ $# -gt 0 ]] && shift || true
+  if [[ $# -gt 0 ]]; then
+    shift
+  fi
 
   local EXTRA_OUT=""
   case "$SUB" in
@@ -363,7 +365,9 @@ _state_pick() {
 cmd_state() {
   need_cmd terraform "brew install terraform"
   local ssub="${1:-}"
-  [[ $# -gt 0 ]] && shift || true
+  if [[ $# -gt 0 ]]; then
+    shift
+  fi
 
   case "$ssub" in
     "")

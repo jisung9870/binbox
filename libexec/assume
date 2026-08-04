@@ -688,7 +688,9 @@ _profile_show() {
 
 cmd_profile() {
   local sub="${1:-}"
-  [[ $# -gt 0 ]] && shift || true
+  if [[ $# -gt 0 ]]; then
+    shift
+  fi
   case "$sub" in
     ""|list) _profiles ;;
     add) _profile_add "$@" ;;
