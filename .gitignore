@@ -3,6 +3,9 @@
 .omc/*
 !.omc/skills/
 
+# oh-my-codex operational state
+.omx/
+
 # macOS
 .DS_Store
 
