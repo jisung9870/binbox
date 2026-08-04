@@ -26,6 +26,7 @@ tm — tmux 세션 관리 통합 명령
   tm layout [이름] [경로]  # 레이아웃 선택 후 세션 생성 (golang, k8s, terraform)
   tm kill                 # fzf 다중 선택으로 세션 삭제
   tm kill <패턴>           # 패턴 매칭 세션 일괄 삭제 (확인 후)
+  tm projects --plain     # 정규화된 프로젝트 후보 경로 출력 (계약 검증용)
   tm dirs                 # 프로젝트 디렉토리 목록/상태
   tm dirs add [-d] [경로]  # 목록에 추가 (기본 $PWD, -d: 그 디렉토리 자체를 후보로)
   tm dirs rm              # fzf 다중 선택으로 목록에서 제거
@@ -91,7 +92,7 @@ _go_record_recent() {
   mv "${RECENT_FILE}.tmp" "$RECENT_FILE"
 }
 
-cmd_go() {
+_load_project_candidates() {
   PROJECT_DIRS=()
   DIRECT_DIRS=()
   if [[ -f "$CONFIG_FILE" ]]; then
@@ -126,6 +127,19 @@ cmd_go() {
       valid_direct+=("$dir")
     fi
   done
+}
+
+cmd_projects() {
+  local format="${1:-}"
+  if [[ "$format" != "--plain" || $# -ne 1 ]]; then
+    die "사용법: tm projects --plain"
+  fi
+  _load_project_candidates
+  _go_read_candidates
+}
+
+cmd_go() {
+  _load_project_candidates
 
   if [[ ${#valid_dirs[@]} -eq 0 && ${#valid_direct[@]} -eq 0 ]]; then
     die "사용 가능한 프로젝트 디렉토리가 없습니다." "설정 파일을 확인하세요: $CONFIG_FILE"
@@ -429,7 +443,9 @@ _dirs_prune() {
 
 cmd_dirs() {
   local dsub="${1:-}"
-  [[ $# -gt 0 ]] && shift || true
+  if [[ $# -gt 0 ]]; then
+    shift
+  fi
   case "$dsub" in
     "")    _dirs_list ;;
     add)   _dirs_add "$@" ;;
@@ -441,7 +457,9 @@ cmd_dirs() {
 }
 
 sub="${1:-go}"
-[[ $# -gt 0 ]] && shift || true
+if [[ $# -gt 0 ]]; then
+  shift
+fi
 
 case "$sub" in
   -h|--help|help) usage; exit 0 ;;
@@ -449,6 +467,7 @@ case "$sub" in
   attach|a) need_cmd tmux "brew install tmux"; need_cmd fzf "brew install fzf"; cmd_attach ;;
   layout)   need_cmd tmux "brew install tmux"; need_cmd fzf "brew install fzf"; cmd_layout "$@" ;;
   kill)     need_cmd tmux "brew install tmux"; cmd_kill "$@" ;;
+  projects) cmd_projects "$@" ;;
   dirs)     cmd_dirs "$@" ;;
   *) usage >&2; die "알 수 없는 서브커맨드: $sub" ;;
 esac
