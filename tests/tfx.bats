@@ -470,3 +470,187 @@ esac
   [ "$status" -eq 1 ]
   [[ "$output" == *"state가 비어 있습니다"* ]]
 }
+
+# --- clean ---
+# clean 은 terraform 을 호출하지 않고 실제 find/rm/confirm 만 쓴다 (스텁 불필요)
+
+@test "tfx clean: nothing to clean reports empty" {
+  rm -f tfplan
+  run bash -c "printf 'y' | '$TFX' clean"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"정리할 대상이 없습니다"* ]]
+}
+
+@test "tfx clean: removes .tf-review and plan file, keeps .terraform" {
+  mkdir -p .tf-review .terraform # tfplan은 setup이 생성
+  run bash -c "printf 'y' | '$TFX' clean"
+  [ "$status" -eq 0 ]
+  [ ! -e .tf-review ]
+  [ ! -e tfplan ]
+  [ -d .terraform ]
+  [[ "$output" == *"함께 지우려면 --deep"* ]]
+}
+
+@test "tfx clean --deep: also removes .terraform" {
+  mkdir -p .tf-review .terraform
+  run bash -c "printf 'y' | '$TFX' clean --deep"
+  [ "$status" -eq 0 ]
+  [ ! -e .terraform ]
+  [ ! -e .tf-review ]
+}
+
+@test "tfx clean: n cancels without removing" {
+  mkdir -p .tf-review
+  run bash -c "printf 'n' | '$TFX' clean"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"취소했습니다"* ]]
+  [ -d .tf-review ]
+  [ -e tfplan ]
+}
+
+@test "tfx clean: default is current folder only (not recursive)" {
+  mkdir -p sub/.tf-review
+  rm -f tfplan
+  run bash -c "printf 'y' | '$TFX' clean"
+  [ "$status" -eq 0 ]
+  [ -d sub/.tf-review ]
+  [[ "$output" == *"정리할 대상이 없습니다"* ]]
+}
+
+@test "tfx clean -r: recursive removes nested .tf-review" {
+  mkdir -p sub/.tf-review
+  rm -f tfplan
+  run bash -c "printf 'y' | '$TFX' clean -r"
+  [ "$status" -eq 0 ]
+  [ ! -e sub/.tf-review ]
+}
+
+@test "tfx clean DIR: scoped to given root" {
+  mkdir -p a/.tf-review b/.tf-review
+  rm -f tfplan
+  run bash -c "printf 'y' | '$TFX' clean a"
+  [ "$status" -eq 0 ]
+  [ ! -e a/.tf-review ]
+  [ -d b/.tf-review ]
+}
+
+@test "tfx clean: unknown option dies" {
+  run "$TFX" clean --bogus
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"알 수 없는 옵션"* ]]
+}
+
+@test "tfx review clean: forwards to clean" {
+  mkdir -p .tf-review
+  rm -f tfplan
+  run bash -c "printf 'y' | '$TFX' review clean"
+  [ "$status" -eq 0 ]
+  [ ! -e .tf-review ]
+}
+
+# --- review ---
+# terraform 스텁: init rc 지정, plan 은 변경있음(2), show -json 은 fixture 반환.
+# show 매칭을 plan 보다 먼저 둔다 (show 인자에 plan.bin 이 들어있어 순서 중요).
+stub_terraform_review() {
+  local init_rc="${1:-0}"
+  make_stub terraform "
+case \"\$*\" in
+  *init*) exit $init_rc ;;
+  *'show -json'*) cat '$STUB_DIR/plan.json' 2>/dev/null ;;
+  *plan*) exit 2 ;;
+esac
+"
+}
+write_plan_json() { cat > "$STUB_DIR/plan.json"; }
+
+@test "tfx review: missing backend.tf errors" {
+  stub_terraform_review 0
+  mkdir -p stack1
+  run "$TFX" review stack1
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"backend.tf"* ]]
+}
+
+@test "tfx review: tag-only update is EXPECTED (exit 0)" {
+  stub_terraform_review 0
+  mkdir -p stack1; touch stack1/backend.tf
+  write_plan_json <<'JSON'
+{"resource_changes":[{"address":"aws_s3_bucket.b","change":{"actions":["update"],"before":{"tags":{"X":"a"}},"after":{"tags":{"X":"b"}}}}]}
+JSON
+  run "$TFX" review stack1
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"EXPECTED"* ]]
+}
+
+@test "tfx review: non-tag update is REVIEW (exit 2)" {
+  stub_terraform_review 0
+  mkdir -p stack1; touch stack1/backend.tf
+  write_plan_json <<'JSON'
+{"resource_changes":[{"address":"aws_instance.a","change":{"actions":["update"],"before":{"instance_type":"t3.small"},"after":{"instance_type":"t3.large"}}}]}
+JSON
+  run "$TFX" review stack1
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"REVIEW"* ]]
+  [[ "$output" == *"instance_type"* ]]
+}
+
+@test "tfx review: no changes is NOCHANGE (exit 0)" {
+  stub_terraform_review 0
+  mkdir -p stack1; touch stack1/backend.tf
+  write_plan_json <<'JSON'
+{"resource_changes":[]}
+JSON
+  run "$TFX" review stack1
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"NOCHANGE"* ]]
+}
+
+@test "tfx review: init failure is ERROR (exit 2)" {
+  stub_terraform_review 1
+  mkdir -p stack1; touch stack1/backend.tf
+  run "$TFX" review stack1
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"ERROR"* ]]
+  [[ "$output" == *"init 실패"* ]]
+}
+
+@test "tfx review: create not allowed by default is REVIEW" {
+  stub_terraform_review 0
+  mkdir -p stack1; touch stack1/backend.tf
+  write_plan_json <<'JSON'
+{"resource_changes":[{"address":"aws_s3_bucket.new","change":{"actions":["create"],"before":null,"after":{"bucket":"x"}}}]}
+JSON
+  run "$TFX" review stack1
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"REVIEW"* ]]
+}
+
+@test "tfx review --allow-actions: create allowed becomes EXPECTED" {
+  stub_terraform_review 0
+  mkdir -p stack1; touch stack1/backend.tf
+  write_plan_json <<'JSON'
+{"resource_changes":[{"address":"aws_s3_bucket.new","change":{"actions":["create"],"before":null,"after":{"bucket":"x"}}}]}
+JSON
+  run "$TFX" review --allow-actions update,create stack1
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"EXPECTED"* ]]
+}
+
+@test "tfx review: .tf-review.json ruleset is honored" {
+  stub_terraform_review 0
+  mkdir -p stack1; touch stack1/backend.tf
+  printf '{"allow_actions":["update","create"]}\n' > .tf-review.json
+  write_plan_json <<'JSON'
+{"resource_changes":[{"address":"aws_s3_bucket.new","change":{"actions":["create"],"before":null,"after":{"bucket":"x"}}}]}
+JSON
+  run "$TFX" review stack1
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"EXPECTED"* ]]
+}
+
+@test "tfx review: unknown option dies" {
+  stub_terraform_review 0
+  run "$TFX" review --bogus
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"알 수 없는 옵션"* ]]
+}
