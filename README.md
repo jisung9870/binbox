@@ -88,8 +88,10 @@ bb <Tab>          # 자동완성 (zsh: 개별 명령 포함, bash: bb만)
 | `tm attach` | 기존 세션 선택 또는 새 세션 생성 |
 | `tm layout` | 레이아웃 선택 후 세션 생성 (golang, k8s, terraform) |
 | `tm kill [패턴]` | fzf 다중 선택 / 패턴 매칭으로 세션 삭제 |
+| `tm projects --plain\|--json` | project 후보를 text 또는 versioned JSON으로 출력 |
+| `tm sessions --json` | tmux session 목록을 versioned JSON으로 출력 |
 | `tm dirs` | 프로젝트 디렉토리 목록 관리 (add / rm / edit) |
-| `agents` | Claude/Codex tmux pane 상태 조회 및 fzf 점프 |
+| `agents` | Claude/Codex tmux pane 상태 조회 및 fzf 점프 (`--json` 지원) |
 
 ```bash
 tm                      # 프로젝트 선택 → 세션 생성
@@ -99,6 +101,20 @@ tm dirs add ~/home/poc  # 부모 디렉토리 등록 (자식들이 후보)
 tm dirs add -d ~/binbox # 단일 디렉토리 직접 등록
 agents                  # agent pane 선택 후 이동 (--list, --usage)
 ```
+
+구조화 출력을 사용하는 client는 다음 명령만 호출한다.
+
+```bash
+bb tm projects --json
+bb tm sessions --json
+bb agents --json
+bb doctor --json
+```
+
+모든 JSON 명령은 `schema_version`, `ok`, `data`, `warnings`, `error` envelope를 사용하며 stdout에는
+JSON 하나만 출력한다. `tmux` 또는 JSON encoder가 없으면 exit `3`과 `CAPABILITY_UNAVAILABLE`을
+반환한다. `agents`의 기존 pane 판정은 아직 화면 기반이므로 각 항목에 `state_source: "scrape"`가
+표시된다. 새 client는 schema version이 다르면 해석하지 않고 binbox/client 동시 update를 안내해야 한다.
 
 ### git
 

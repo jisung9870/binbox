@@ -217,12 +217,52 @@ agents — Claude/Codex tmux pane 상태 조회 및 점프
   agents            # fzf로 pane 선택 후 이동 (ctrl-r: 새로고침)
   agents --list     # pane 목록만 출력
   agents --usage    # 계정/상태 요약만 출력
+  agents --json     # versioned JSON envelope
 
 상태:
   ◍ NEEDS YOU   입력 대기 중
   ● running     작업 중
   ✓ idle        대기
 EOF
+}
+
+list_agents_json() {
+  if ! command -v tmux >/dev/null 2>&1; then
+    printf '{"schema_version":1,"ok":false,"data":null,"warnings":[],"error":{"code":"CAPABILITY_UNAVAILABLE","message":"tmux is unavailable","details":{"capability":"tmux"}}}\n'
+    return 3
+  fi
+  if ! command -v python3 >/dev/null 2>&1; then
+    printf '{"schema_version":1,"ok":false,"data":null,"warnings":[],"error":{"code":"CAPABILITY_UNAVAILABLE","message":"python3 is required for JSON output","details":{"capability":"python3"}}}\n'
+    return 3
+  fi
+
+  local current
+  current=$(tmux display-message -p '#{session_name}:#{window_index}.#{pane_index}' 2>/dev/null || true)
+  while IFS= read -r pane_id; do
+    [ -n "$pane_id" ] || continue
+    local target cmd path pane_title text st up ctx kind title request is_current
+    target=$(tmux display-message -p -t "$pane_id" '#{session_name}:#{window_index}.#{pane_index}' 2>/dev/null) || continue
+    cmd=$(tmux display-message -p -t "$pane_id" '#{pane_current_command}' 2>/dev/null) || continue
+    path=$(tmux display-message -p -t "$pane_id" '#{pane_current_path}' 2>/dev/null) || continue
+    pane_title=$(tmux display-message -p -t "$pane_id" '#{pane_title}' 2>/dev/null) || continue
+    printf '%s' "$cmd" | grep -qiE "$AI_COMMAND_PATTERN" || continue
+    text=$(snap "$target")
+    if [ -n "$AI_CONTENT_HINT" ] && ! printf '%s' "$cmd" | grep -qiE 'codex'; then
+      printf '%s' "$text" | grep -qiE "$AI_CONTENT_HINT" || continue
+    fi
+    st=$(classify "$text")
+    up=$(uptime_of "$target")
+    ctx=$(ctx_of "$text")
+    [ -n "$ctx" ] || ctx="-"
+    kind=$(kind_of "$cmd" "$text")
+    title=$(title_of "$pane_title" "$path")
+    request=$(request_of "$text")
+    is_current=0
+    [ "$target" = "$current" ] && is_current=1
+    printf '%s\0%s\0%s\0%s\0%s\0%s\0%s\0%s\0%s\0%s\0%s\0' \
+      "$target" "$kind" "$st" "$path" "$title" "$up" "$ctx" "$request" "$is_current" "$pane_id" "$cmd"
+  done < <(tmux list-panes -a -F '#{pane_id}' 2>/dev/null || true) |
+    python3 "$(cd "$(dirname "$0")/.." && pwd)/lib/json-output.py" agents
 }
 
 case "${1:-}" in
@@ -237,6 +277,14 @@ case "${1:-}" in
   --usage)
     usage_header
     exit 0
+    ;;
+  --json)
+    if [ "$#" -ne 1 ]; then
+      printf '{"schema_version":1,"ok":false,"data":null,"warnings":[],"error":{"code":"INVALID_ARGUMENT","message":"usage: agents --json","details":{}}}\n'
+      exit 2
+    fi
+    list_agents_json
+    exit $?
     ;;
 esac
 if ! command -v fzf >/dev/null 2>&1; then

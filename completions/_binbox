@@ -306,6 +306,8 @@ _binbox() {
           'attach:세션 선택 또는 새 세션 생성'
           'layout:레이아웃 선택 후 세션 생성'
           'kill:세션 제거 (fzf 다중 선택 / 패턴)'
+          'projects:프로젝트 후보 출력 (--plain / --json)'
+          'sessions:tmux 세션 JSON 출력'
           'dirs:프로젝트 디렉토리 목록 관리'
         )
         _describe 'subcommand' subs
@@ -313,6 +315,8 @@ _binbox() {
         case "${words[2]}" in
           kill)   _binbox_tmux_sessions ;;
           layout) _binbox_layouts ;;
+          projects) _values 'output format' '--plain[경로 목록]' '--json[JSON envelope]' ;;
+          sessions) _values 'output format' '--json[JSON envelope]' ;;
           dirs)
             local -a dsubs=(
               'add:목록에 추가 (-d: 직접 등록)'
