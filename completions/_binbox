@@ -160,6 +160,7 @@ _binbox() {
           'end:세션 종료'
           'state:state 탐색/조작 (fzf)'
           'review:여러 root 배치 검토 (init→plan→분류)'
+          'clean:terraform 산출물 정리 (.tf-review·plan, --deep로 .terraform)'
         )
         _describe 'subcommand' subs
       elif (( CURRENT == 3 )); then
@@ -190,18 +191,28 @@ _binbox() {
             ;;
           review)
             _values 'option' \
+              'clean[검토 산출물(.tf-review) 정리]' \
               '--all[backend.tf 가진 전체 root]' \
               '--repo[검토 리포 루트]' \
               '--config[규칙 설정 파일]' \
               '--allow-paths[허용 변경 path]' \
               '--allow-actions[허용 action]' \
-              '--match[매칭 모드 prefix|glob]'
+              '--match[매칭 모드 prefix|glob]' \
+              '--deep[정리 시 .terraform 도 제거]'
+            _files -/
+            ;;
+          clean)
+            _values 'option' \
+              '-r[트리 전체 정리]' \
+              '--all[트리 전체 정리]' \
+              '--deep[.terraform 도 제거]' \
+              '--repo[정리 기준 리포 루트]'
             _files -/
             ;;
         esac
       elif (( CURRENT > 3 )) && [[ "${words[2]}" == sum ]]; then
         _files
-      elif (( CURRENT > 3 )) && [[ "${words[2]}" == review ]]; then
+      elif (( CURRENT > 3 )) && [[ "${words[2]}" == (review|clean) ]]; then
         _files -/
       fi
       ;;

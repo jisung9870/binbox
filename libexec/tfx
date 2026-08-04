@@ -36,6 +36,8 @@ tfx — terraform 워크플로우 통합 명령
   tfx state rm            # fzf 다중 선택 → 확인 후 state rm
   tfx review [옵션] [root] # 여러 root를 init→plan→분류 (NOCHANGE/EXPECTED/REVIEW/ERROR)
                           #   인자 없으면 fzf 다중 선택, --all 로 전체 (backend.tf 자동 탐색)
+  tfx clean [옵션] [root]  # terraform 산출물 정리 (.tf-review·plan 파일, --deep: .terraform)
+                          #   기본 현재 폴더, -r/--all 로 트리 전체. 'tfx review clean' 도 동일.
 
 Planfile:
   기본값은 ./tfplan. 환경변수 TFPLAN_FILE로 지정 가능. (plan/sum/apply 공유)
@@ -52,6 +54,7 @@ Review (기능은 tfx 안에서, 자격/변수는 assume·wenv 가 담당 — �
   결과: NOCHANGE(변경 없음) / EXPECTED(규칙 내) / REVIEW(규칙 밖) / ERROR. 로그는 각 root의 .tf-review/.
   REVIEW·ERROR 가 하나라도 있으면 exit 2 (CI 게이트).
   env: PLAN_LOCK(기본 false) / PLAN_ARGS(plan 추가 인자) / INIT_RECONFIGURE(기본 true).
+  정리: tfx clean [root ...]  (= tfx review clean) — .tf-review·plan 파일 정리, --deep 로 .terraform 도.
 
 동작:
   - plan 파일 apply는 terraform의 yes 확인이 생략되므로 tfx가 별도 y/n 확인을 추가한다.
@@ -72,6 +75,9 @@ Review (기능은 tfx 안에서, 자격/변수는 assume·wenv 가 담당 — �
   tfx review --all                    # backend.tf 가진 전체 root
   tfx review --repo ~/infra a b       # 특정 root만
   tfx review --allow-actions update,create
+  tfx clean                           # 현재 폴더 산출물 정리 (.tf-review·plan 파일)
+  tfx clean -r --deep                 # 트리 전체 (.terraform 포함)
+  tfx clean real/r/s3                 # 특정 root
 EOF
 }
 
@@ -494,7 +500,76 @@ _review_discover() {
     -exec dirname {} \; | sort -u | sed 's|^\./||'
 }
 
+# clean — terraform 작업 산출물 정리 (.tf-review / plan 파일, --deep 시 .terraform 도).
+# 기본은 현재 폴더만. root 지정 또는 -r/--all 로 트리 전체. rm 전 목록 표시 + 확인.
+cmd_clean() {
+  local base="${TF_REPO:-$PWD}" deep=0 recursive=0
+  local -a roots=()
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -h|--help) usage; exit 0 ;;
+      -r|--all) recursive=1; shift ;;
+      --repo) base="${2:-}"; shift 2 ;;
+      --repo=*) base="${1#*=}"; shift ;;
+      --deep) deep=1; shift ;;
+      --) shift; while [[ $# -gt 0 ]]; do roots+=("$1"); shift; done ;;
+      -*) die "알 수 없는 옵션: $1" "사용법: tfx clean [-r] [--deep] [--repo PATH] [root ...]" ;;
+      *) roots+=("$1"); shift ;;
+    esac
+  done
+  [[ -d "$base" ]] || die "리포 경로가 디렉터리가 아닙니다: $base"
+  base="$(cd "$base" && pwd)"; cd "$base" || die "cd 실패: $base"
+
+  local plan_file="${TFPLAN_FILE:-tfplan}" destroy_file="${TFDESTROY_PLAN_FILE:-tfdestroyplan}"
+
+  # 검색 범위/깊이: 인자 지정 > -r 트리 전체 > (기본) 현재 폴더만
+  local -a scopes=() maxdepth=()
+  if [[ ${#roots[@]} -gt 0 ]]; then
+    scopes=("${roots[@]}")
+  elif [[ $recursive -eq 1 ]]; then
+    scopes=(".")
+  else
+    scopes=("."); maxdepth=(-maxdepth 1)
+  fi
+
+  # find 표현식: .tf-review(dir) / plan 파일 [+ --deep 시 .terraform(dir)]
+  local -a expr=(-name .tf-review -type d)
+  [[ $deep -eq 1 ]] && expr+=(-o -name .terraform -type d)
+  expr+=(-o -name "$plan_file" -type f -o -name "$destroy_file" -type f)
+
+  local -a targets=()
+  local sc line has_tf=0
+  for sc in "${scopes[@]}"; do
+    sc="${sc#./}"
+    [[ -e "$sc" ]] || die "경로가 없습니다: $base/$sc"
+    while IFS= read -r line; do
+      [[ -n "$line" ]] && targets+=("${line#./}")
+    done < <(find "$sc" ${maxdepth[@]+"${maxdepth[@]}"} \( "${expr[@]}" \) 2>/dev/null)
+    if [[ $deep -eq 0 ]]; then
+      if find "$sc" ${maxdepth[@]+"${maxdepth[@]}"} -name .terraform -type d 2>/dev/null | grep -q .; then
+        has_tf=1
+      fi
+    fi
+  done
+
+  if [[ ${#targets[@]} -eq 0 ]]; then
+    echo "정리할 대상이 없습니다 — REPO=$base"
+    [[ $has_tf -eq 1 ]] && echo "  (.terraform 는 남아 있음 — 함께 지우려면 --deep)"
+    exit 0
+  fi
+
+  echo "삭제 대상 (${#targets[@]}개, REPO=$base):"
+  printf '  %s\n' "${targets[@]}"
+  [[ $deep -eq 1 ]] && echo "  ※ .terraform 삭제 시 다음 실행에서 재-init(provider/모듈 재다운로드) 필요"
+  [[ $deep -eq 0 && $has_tf -eq 1 ]] && echo "  (.terraform 는 유지 — 함께 지우려면 --deep)"
+  confirm "위 항목을 삭제할까요?" || { echo "취소했습니다."; exit 0; }
+  rm -rf -- "${targets[@]}"
+  echo "✓ 정리 완료 (${#targets[@]}개)"
+  exit 0
+}
+
 cmd_review() {
+  if [[ "${1:-}" == clean ]]; then shift; cmd_clean "$@"; fi  # tfx review clean = tfx clean
   need_cmd terraform "brew install terraform"
   need_cmd jq "brew install jq"
   # -detailed-exitcode(2) 와 root별 실패를 rc로 직접 판정하므로 errexit 를 끈다
@@ -680,6 +755,7 @@ case "${1:-}" in
   end)     rm -f "$SESSION_FILE"; echo "세션 종료됨" ;;
   state)   shift; cmd_state "$@" ;;
   review)  shift; cmd_review "$@" ;;
+  clean)   shift; cmd_clean "$@" ;;
   *)
     echo "unknown subcommand: $1" >&2
     usage >&2
