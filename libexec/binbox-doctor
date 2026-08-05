@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
+ROOT_DIR=$(cd "$SCRIPT_DIR/.." && pwd)
+
 core_missing=0
 optional_missing=0
 OS=$(uname -s)
@@ -27,6 +30,49 @@ check_cmd() {
     fi
   fi
 }
+
+emit_capability() {
+  local name="$1" scope="$2" description="$3" hint="${4:-}" available=0 path=""
+  if command -v "$name" >/dev/null 2>&1; then
+    available=1
+    path=$(command -v "$name")
+  fi
+  printf '%s\0%s\0%s\0%s\0%s\0%s\0' "$name" "$scope" "$description" "$available" "$path" "$hint"
+}
+
+doctor_json() {
+  if ! command -v python3 >/dev/null 2>&1; then
+    printf '{"schema_version":1,"ok":false,"data":null,"warnings":[],"error":{"code":"CAPABILITY_UNAVAILABLE","message":"python3 is required for JSON output","details":{"capability":"python3"}}}\n'
+    return 3
+  fi
+  {
+    emit_capability docker core "dx container runner" "$(pkg_hint 'brew install --cask docker' 'Docker Desktop WSL integration 또는 sudo apt install docker.io')"
+    emit_capability tmux core "tmux helpers" "$(pkg_hint 'brew install tmux' 'sudo apt install tmux')"
+    emit_capability fzf core "interactive selectors" "$(pkg_hint 'brew install fzf' 'sudo apt install fzf')"
+    emit_capability git core "gx" "$(pkg_hint 'brew install git' 'sudo apt install git')"
+    emit_capability lsof core "portcheck" "$(pkg_hint 'usually preinstalled on macOS' 'sudo apt install lsof')"
+    emit_capability kubectl optional "kx/wenv" "$(pkg_hint 'brew install kubectl' 'sudo snap install kubectl --classic')"
+    emit_capability terraform optional "tfx" "$(pkg_hint 'brew install terraform' 'hashicorp apt repo — developer.hashicorp.com/terraform/install')"
+    emit_capability tf-summarize optional "tfx sum" "install tf-summarize"
+    emit_capability aws optional "assume/assm/wenv/tfx" "$(pkg_hint 'brew install awscli' 'AWS 공식 installer (awscli v2)')"
+    emit_capability session-manager-plugin optional "assm" "$(pkg_hint 'brew install session-manager-plugin' 'AWS 공식 .deb 설치')"
+    emit_capability age optional "sec" "$(pkg_hint 'brew install age' 'sudo apt install age')"
+    emit_capability jq optional "assume/sec" "$(pkg_hint 'brew install jq' 'sudo apt install jq')"
+    emit_capability shellcheck optional "binbox-check" "$(pkg_hint 'brew install shellcheck' 'sudo apt install shellcheck')"
+    emit_capability bats optional "make test" "$(pkg_hint 'brew install bats-core' 'sudo apt install bats')"
+    emit_capability trivy optional "tvx" "$(pkg_hint 'brew install trivy' 'Trivy 공식 설치 가이드 — https://trivy.dev/latest/getting-started/installation/')"
+  } | python3 "$ROOT_DIR/lib/json-output.py" doctor
+}
+
+case "${1:-}" in
+  --json)
+    [ "$#" -eq 1 ] || { echo "usage: binbox-doctor [--json]" >&2; exit 2; }
+    doctor_json
+    exit $?
+    ;;
+  "") ;;
+  *) echo "usage: binbox-doctor [--json]" >&2; exit 2 ;;
+esac
 
 echo "binbox doctor"
 echo

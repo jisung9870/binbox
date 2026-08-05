@@ -3,6 +3,10 @@
 .omc/*
 !.omc/skills/
 
+# oh-my-codex operational state
+.omx/
+__pycache__/
+
 # macOS
 .DS_Store
 

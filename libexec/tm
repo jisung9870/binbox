@@ -26,6 +26,8 @@ tm — tmux 세션 관리 통합 명령
   tm layout [이름] [경로]  # 레이아웃 선택 후 세션 생성 (golang, k8s, terraform)
   tm kill                 # fzf 다중 선택으로 세션 삭제
   tm kill <패턴>           # 패턴 매칭 세션 일괄 삭제 (확인 후)
+  tm projects --plain|--json # 정규화된 프로젝트 후보 경로 출력
+  tm sessions --json      # tmux session 목록 출력
   tm dirs                 # 프로젝트 디렉토리 목록/상태
   tm dirs add [-d] [경로]  # 목록에 추가 (기본 $PWD, -d: 그 디렉토리 자체를 후보로)
   tm dirs rm              # fzf 다중 선택으로 목록에서 제거
@@ -91,7 +93,7 @@ _go_record_recent() {
   mv "${RECENT_FILE}.tmp" "$RECENT_FILE"
 }
 
-cmd_go() {
+_load_project_candidates() {
   PROJECT_DIRS=()
   DIRECT_DIRS=()
   if [[ -f "$CONFIG_FILE" ]]; then
@@ -126,6 +128,61 @@ cmd_go() {
       valid_direct+=("$dir")
     fi
   done
+}
+
+cmd_projects() {
+  local format="${1:-}"
+  if [[ "$format" == "--json" && $# -ne 1 ]]; then
+    printf '{"schema_version":1,"ok":false,"data":null,"warnings":[],"error":{"code":"INVALID_ARGUMENT","message":"usage: tm projects --json","details":{}}}\n'
+    return 2
+  fi
+  if [[ "$format" != "--plain" && "$format" != "--json" ]] || [[ $# -ne 1 ]]; then
+    die "사용법: tm projects --plain|--json"
+  fi
+  _load_project_candidates
+  if [[ "$format" == "--plain" ]]; then
+    _go_read_candidates
+  else
+    if ! command -v python3 >/dev/null 2>&1; then
+      printf '{"schema_version":1,"ok":false,"data":null,"warnings":[],"error":{"code":"CAPABILITY_UNAVAILABLE","message":"python3 is required for JSON output","details":{"capability":"python3"}}}\n'
+      return 3
+    fi
+    while IFS= read -r project; do
+      [[ -n "$project" ]] && printf '%s\0' "$project"
+    done < <(_go_read_candidates) | python3 "$BINBOX_DIR/lib/json-output.py" projects
+  fi
+}
+
+cmd_sessions() {
+  local session_id name windows attached created
+  if [[ "${1:-}" == "--json" && $# -ne 1 ]]; then
+    printf '{"schema_version":1,"ok":false,"data":null,"warnings":[],"error":{"code":"INVALID_ARGUMENT","message":"usage: tm sessions --json","details":{}}}\n'
+    return 2
+  fi
+  if [[ "${1:-}" != "--json" ]]; then
+    die "사용법: tm sessions --json"
+  fi
+  if ! command -v tmux >/dev/null 2>&1; then
+    printf '{"schema_version":1,"ok":false,"data":null,"warnings":[],"error":{"code":"CAPABILITY_UNAVAILABLE","message":"tmux is unavailable","details":{"capability":"tmux"}}}\n'
+    return 3
+  fi
+  if ! command -v python3 >/dev/null 2>&1; then
+    printf '{"schema_version":1,"ok":false,"data":null,"warnings":[],"error":{"code":"CAPABILITY_UNAVAILABLE","message":"python3 is required for JSON output","details":{"capability":"python3"}}}\n'
+    return 3
+  fi
+  while IFS= read -r session_id; do
+    [[ -n "$session_id" ]] || continue
+    name=$(tmux display-message -p -t "$session_id" '#{session_name}' 2>/dev/null) || continue
+    windows=$(tmux display-message -p -t "$session_id" '#{session_windows}' 2>/dev/null) || continue
+    attached=$(tmux display-message -p -t "$session_id" '#{session_attached}' 2>/dev/null) || continue
+    created=$(tmux display-message -p -t "$session_id" '#{session_created}' 2>/dev/null) || continue
+    printf '%s\0%s\0%s\0%s\0%s\0' "$session_id" "$name" "$windows" "$attached" "$created"
+  done < <(tmux list-sessions -F '#{session_id}' 2>/dev/null || true) |
+    python3 "$BINBOX_DIR/lib/json-output.py" sessions
+}
+
+cmd_go() {
+  _load_project_candidates
 
   if [[ ${#valid_dirs[@]} -eq 0 && ${#valid_direct[@]} -eq 0 ]]; then
     die "사용 가능한 프로젝트 디렉토리가 없습니다." "설정 파일을 확인하세요: $CONFIG_FILE"
@@ -429,7 +486,9 @@ _dirs_prune() {
 
 cmd_dirs() {
   local dsub="${1:-}"
-  [[ $# -gt 0 ]] && shift || true
+  if [[ $# -gt 0 ]]; then
+    shift
+  fi
   case "$dsub" in
     "")    _dirs_list ;;
     add)   _dirs_add "$@" ;;
@@ -441,7 +500,9 @@ cmd_dirs() {
 }
 
 sub="${1:-go}"
-[[ $# -gt 0 ]] && shift || true
+if [[ $# -gt 0 ]]; then
+  shift
+fi
 
 case "$sub" in
   -h|--help|help) usage; exit 0 ;;
@@ -449,6 +510,8 @@ case "$sub" in
   attach|a) need_cmd tmux "brew install tmux"; need_cmd fzf "brew install fzf"; cmd_attach ;;
   layout)   need_cmd tmux "brew install tmux"; need_cmd fzf "brew install fzf"; cmd_layout "$@" ;;
   kill)     need_cmd tmux "brew install tmux"; cmd_kill "$@" ;;
+  projects) cmd_projects "$@" ;;
+  sessions) cmd_sessions "$@" ;;
   dirs)     cmd_dirs "$@" ;;
   *) usage >&2; die "알 수 없는 서브커맨드: $sub" ;;
 esac

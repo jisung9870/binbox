@@ -16,7 +16,9 @@ export PATH
 
 # 2) 개별 명령 alias 복원 (aliases.zsh의 bash 버전 — 실행 비트만 검사)
 for _t in "$_binbox_dir"/libexec/*; do
-  [ -f "$_t" ] && [ -x "$_t" ] || continue
+  if [ ! -f "$_t" ] || [ ! -x "$_t" ]; then
+    continue
+  fi
   _name=${_t##*/}
   # shellcheck disable=SC2139 # 정의 시점 확장이 의도된 동작 (도구별 alias)
   case "$_name" in
