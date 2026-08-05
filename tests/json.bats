@@ -68,6 +68,10 @@ case "$1" in
     ;;
 esac
 '
+  make_stub wb '
+printf "%s\n" "$@" >> "$STUB_DIR/wb.args"
+exit 7
+'
   run "$BINBOX_DIR/libexec/agents" --json
   [ "$status" -eq 0 ]
   run python3 -c '
@@ -78,6 +82,12 @@ assert a["state"] == "running"
 assert a["state_source"] == "scrape"
 assert a["path"] == "/tmp/project path"
 ' "$output"
+  [ "$status" -eq 0 ]
+  run python3 -c '
+from pathlib import Path
+args = Path(__import__("sys").argv[1]).read_text().splitlines()
+assert args == ["compatibility", "observe", "--client", "binbox", "--feature", "agents", "--source", "scrape"]
+' "$STUB_DIR/wb.args"
   [ "$status" -eq 0 ]
 }
 

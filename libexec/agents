@@ -265,6 +265,13 @@ list_agents_json() {
     python3 "$(cd "$(dirname "$0")/.." && pwd)/lib/json-output.py" agents
 }
 
+observe_agent_scrape() {
+  command -v wb >/dev/null 2>&1 || return 0
+  {
+    wb compatibility observe --client binbox --feature agents --source scrape >/dev/null 2>&1 || true
+  } &
+}
+
 case "${1:-}" in
   -h|--help|help)
     usage
@@ -284,7 +291,9 @@ case "${1:-}" in
       exit 2
     fi
     list_agents_json
-    exit $?
+    status=$?
+    [ "$status" -eq 0 ] && observe_agent_scrape
+    exit "$status"
     ;;
 esac
 if ! command -v fzf >/dev/null 2>&1; then
